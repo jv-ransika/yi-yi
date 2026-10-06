@@ -88,12 +88,61 @@ export type McpPrincipalAccessView = {
 export type PolicySummaryView = {
   policyId: string;
   name: string;
-  versionNumber: number;
+  /** The version in force. */
+  defaultVersion: number;
   rowVersion: number;
 };
 
-/** Policy commands; payload `{name, principalType, principalId}`, guarded by the policy's rowVersion. */
-export const PolicyCommandKind = { Attach: "iam:AttachPolicy", Detach: "iam:DetachPolicy" } as const;
+/** One statement of a policy document as authored (Effect, Action, Resource, Condition). */
+export type PolicyStatementDocument = {
+  Sid?: string;
+  Effect: "Allow" | "Deny";
+  Action: string | string[];
+  Resource?: string | string[];
+  Condition?: Record<string, Record<string, string | string[]>>;
+};
+
+export type PolicyDocument = { Version?: string; Statement: PolicyStatementDocument[] };
+
+/** GET /api/policies/{name}: every version, newest first, and what the policy is attached to. */
+export type PolicyDetailView = {
+  policyId: string;
+  name: string;
+  description: string;
+  /** What a change to this policy sends as expectedVersion. */
+  rowVersion: number;
+  /** The version in force. */
+  defaultVersion: number;
+  versions: Array<{
+    versionNumber: number;
+    inForce: boolean;
+    createdAt: string | null;
+    createdBy: string | null;
+    document: PolicyDocument;
+  }>;
+  attachments: Array<{
+    principalType: "user" | "role";
+    /** A user id or a role code. */
+    principalId: string;
+    /** A person's name or a role's description. */
+    label: string | null;
+    attachedAt: string | null;
+  }>;
+};
+
+/**
+ * Policy commands, each guarded by the policy's rowVersion except Create.
+ * Attach and Detach: `{name, principalType, principalId}`. CreateVersion: `{name, document}`
+ * (not in force until SetDefaultVersion `{name, versionNumber}`). Create: `{name, description, document}`.
+ * A change that would leave nobody able to change the policy again is refused (R-IAM-39).
+ */
+export const PolicyCommandKind = {
+  Attach: "iam:AttachPolicy",
+  Detach: "iam:DetachPolicy",
+  Create: "iam:CreatePolicy",
+  CreateVersion: "iam:CreatePolicyVersion",
+  SetDefaultVersion: "iam:SetDefaultPolicyVersion",
+} as const;
 
 /** GET /api/profile: a person's own account (R-IAM-32), with the version a change sends back. */
 export type ProfileView = {
@@ -170,20 +219,47 @@ export type ActionView = {
   implemented: boolean;
 };
 
-export type PolicyStatementView = {
-  policyId: string;
-  name: string;
+/** One statement that spoke to an access question, with where it came from (R-IAM-40). */
+export type AccessSourceView = {
+  policy: string;
   version: number;
-  effect: string;
-  actions: string[];
+  /** "user" when attached to the person, otherwise the role code it reaches them through. */
+  attachedTo: string;
+  /** The statement's Sid. */
+  statement: string;
+  effect: "Allow" | "Deny";
+  /** What the statement is limited to; "*" for everything. */
   resources: string[];
+  conditions: string[];
 };
 
+/** "blocked" is an explicit Deny, which beats every Allow; "not_granted" is the default Deny. */
+export type AccessOutcome = "allowed" | "blocked" | "not_granted";
+
+/** GET /api/accounts/{id}/access, mirrored from AccessExplanationQuery.AccessView. */
 export type AccountAccessView = {
   userId: string;
+  active: boolean;
   roles: string[];
-  scope: string[];
-  policies?: PolicyStatementView[];
-  inheritedPolicies?: PolicyStatementView[];
-  directPolicies?: PolicyStatementView[];
+  depots: string[];
+  outlets: string[];
+  actions: Array<{
+    action: string;
+    module: string;
+    description: string;
+    outcome: AccessOutcome;
+    /** The statements that produced the outcome. */
+    sources: AccessSourceView[];
+    /** Statements that hold only for some places or under conditions. */
+    limited: AccessSourceView[];
+  }>;
+};
+
+/** GET /api/accounts/{id}/access/check?action=&resource=, answered as a command would be. */
+export type AccessCheckView = {
+  action: string;
+  resource: string;
+  allowed: boolean;
+  reason: string;
+  matching: AccessSourceView[];
 };

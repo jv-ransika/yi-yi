@@ -1,5 +1,23 @@
 # Admin console frontend rebuild
 
+## Permission editing and the access explanation (2026-10-06)
+
+Before this, policy changes were commands sent from a terminal and a person's Access tab said "Effective access unavailable". Now both are on screen, built on the policy commands that already existed; nothing new is written outside the command bus.
+
+Backend, identity module:
+- `domain/policy/AccessExplanation.java`: pure. Wraps `PolicyEvaluator` and adds where each statement came from (policy, version, attached to the person or through which role). The decision is always the evaluator's, so the explanation cannot disagree with enforcement. `Statement.namesAction` finds statements limited to some resources or conditions.
+- `infrastructure/JdbcPolicyRepository.java`: `sourcedStatementsFor(user)` reads the same attachments and default versions as `statementsFor`, with their source; `statementsByActiveUser()` serves the lockout check.
+- `application/AccessExplanationQuery.java`: every implemented action for one person (allowed, blocked, not granted, plus limited statements) and a check of one action on one resource with the decision point's own context. `application/PolicyAdminUseCase.java`: `detail(name)` lists versions newest first with their documents and attachments; `requireSomeoneCanStillChange` refuses a set-default, attach or detach that would leave no active account able to change that policy again (R-IAM-39), inside the command's transaction.
+- `web/PolicyAdminController.java`: `GET /api/policies/{name}`. `web/AccountAdminController.java`: `GET /api/accounts/{id}/access` and `/access/check?action=&resource=`, both needing `iam:ReadPolicy` (R-IAM-40).
+
+Frontend, admin role: `data/policies.ts` (reads and the five policy commands), `access/PoliciesScreen.tsx` (list, detail, attach, detach, put in force, with a confirmation that says who is affected), `access/PolicyEditor.tsx` (a new version from any earlier one, optionally put in force; a new policy, attached to nobody), `access/MemberAccessPanel.tsx` (the Access tab: counts, places, filters, a "Why?" per action and a one-action check) and `access/policyText.ts` (wording). Mirrors are in `shared/domain/identity.ts`; `PolicySummaryView.defaultVersion` now matches the backend field, which was misnamed `versionNumber`.
+
+Flow: People & access > Policies > a policy > New version from the one in force > edit > Save version (or tick Put it in force now). Each write reads the policy again first and sends its `rowVersion`, so a concurrent change is refused, not merged. People > a person > Access shows the result and why.
+
+Verify: `AccessExplanationTest`, `PolicyAccessIntegrationTest`, `FoundationIntegrationTest`, `ModuleBoundaryTest`, the full `mvn verify` against a dedicated PostgreSQL, and `npm run typecheck`, `npm test`, `npm run build`. Rules R-IAM-39 and R-IAM-40 in [RULES-AND-POLICIES](../../architecture/RULES-AND-POLICIES.md), cases SEC-47 and SEC-48 in [EDGE-CASES](../../architecture/EDGE-CASES.md).
+
+Known gaps: the super-admin boundary and delegation limits of [IAM-PLAN](IAM-PLAN.md) are not enforced, so anyone with `iam:*` may change any policy, their own included; the lockout check covers policy changes, not disabling the last administrator or removing their role. Persona toggles remain a sample over fixtures; editing is by policy document. Attachments keep no history (POL-03).
+
 ## Managed reference creation (2026-10-04)
 
 The Add depot, Add outlet and Add vehicle dialogs now send `reference:CreateDepot`, `reference:CreateOutlet` and `reference:CreateVehicle` through the command bus. Each handler validates the full candidate snapshot, stores the managed source row in `ref.managed_additions`, publishes a new immutable version, and refreshes the local cache after commit. A later CSV import overlays the managed rows under the same publication lock. Vehicle and outlet commands require scope for the existing depot; the outlet's depot is derived from its published district. A new depot needs a supplied approximate point and starts empty. Its creator still needs an IAM depot grant to see it in scoped admin reads.

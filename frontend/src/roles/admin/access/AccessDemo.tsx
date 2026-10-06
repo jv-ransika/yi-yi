@@ -15,6 +15,7 @@ import { CatalogueScreen, PeopleScreen, PersonasScreen } from "./screens";
 import { ActionsScreen } from "./RoleActionScreens";
 import { AuditConsole } from "./audit/AuditConsole";
 import { SystemConstraintsScreen } from "./SystemConstraintsScreen";
+import { PoliciesScreen } from "./PoliciesScreen";
 import AssistantsConsole from "../assistants/AssistantsConsole";
 import DemoControlRoom from "../demo/DemoControlRoom";
 import { fetchRoles, fetchActions } from "../data/access";
@@ -22,7 +23,7 @@ import { fetchAccounts, fetchAccount, accountToMember, submitCreateUser, submitG
 import type { RoleView, ActionView } from "@shared/domain/identity";
 import "./access-demo.css";
 
-type Tab = "people" | "personas" | "actions" | "catalogue" | "history" | "audit" | "assistants" | "forecasts" | "vehicles" | "depots" | "outlets" | "orders" | "trips" | "trips_planned" | "trips_live" | "constraints" | "demo";
+type Tab = "people" | "personas" | "policies" | "actions" | "catalogue" | "history" | "audit" | "assistants" | "forecasts" | "vehicles" | "depots" | "outlets" | "orders" | "trips" | "trips_planned" | "trips_live" | "constraints" | "demo";
 type Route = { tab: Tab; member: string | null; persona: Persona | null };
 type Draft = { target: "member" | "persona"; id: string; action: string; choice: Decision; reason: string; place: string; expires: string; stage: "edit" | "review" };
 type Details = { capability: Capability; member?: Member; persona?: Persona };
@@ -40,7 +41,7 @@ const DEFAULT_ADMIN: Member = {
 function routeFromHash(): Route {
   if (typeof window === "undefined") return { tab: "people", member: null, persona: null };
   const [rawTab, id] = window.location.hash.replace(/^#\/?/, "").split("/");
-  const tab: Tab = rawTab === "roles" ? "personas" : (rawTab === "personas" || rawTab === "actions" || rawTab === "catalogue" || rawTab === "history" || rawTab === "audit" || rawTab === "assistants" || rawTab === "forecasts" || rawTab === "vehicles" || rawTab === "depots" || rawTab === "outlets" || rawTab === "orders" || rawTab === "trips" || rawTab === "trips_planned" || rawTab === "trips_live" || rawTab === "constraints" || rawTab === "demo" ? rawTab : "people");
+  const tab: Tab = rawTab === "roles" ? "personas" : (rawTab === "personas" || rawTab === "policies" || rawTab === "actions" || rawTab === "catalogue" || rawTab === "history" || rawTab === "audit" || rawTab === "assistants" || rawTab === "forecasts" || rawTab === "vehicles" || rawTab === "depots" || rawTab === "outlets" || rawTab === "orders" || rawTab === "trips" || rawTab === "trips_planned" || rawTab === "trips_live" || rawTab === "constraints" || rawTab === "demo" ? rawTab : "people");
   return { tab, member: tab === "people" && id || null, persona: tab === "personas" && PERSONAS.some((item) => item.id === id && item.id !== "super_admin") ? id as Persona : null };
 }
 
@@ -59,11 +60,12 @@ const NAV: Array<{ tab: Tab; label: string; icon: IconName; also?: Tab[] }> = [
 
 const PEOPLE_NAV: Array<{ tab: Tab; label: string; icon: IconName }> = [
   { tab: "personas", label: "Personas", icon: "persona" },
+  { tab: "policies", label: "Policies", icon: "permission-list" },
   { tab: "actions", label: "Actions", icon: "bolt" },
   { tab: "catalogue", label: "Permission catalogue", icon: "permission-list" },
   { tab: "history", label: "Change history", icon: "history" },
 ];
-const PEOPLE_TABS: Tab[] = ["people", "personas", "actions", "catalogue", "history"];
+const PEOPLE_TABS: Tab[] = ["people", "personas", "policies", "actions", "catalogue", "history"];
 const TRIPS_NAV: Array<{ tab: Tab; label: string; icon: IconName }> = [
   { tab: "trips_planned", label: "Planned trips", icon: "calendar" },
   { tab: "trips_live", label: "Live trips", icon: "live" },
@@ -73,7 +75,7 @@ const TRIPS_TABS: Tab[] = ["trips", "trips_planned", "trips_live"];
 const PEOPLE: [string, string] = ["People & access", "See who can do what, where they can do it, and why."];
 const TRIPS: [string, string] = ["Trips & execution", "Planning run summary, vehicle allocations, planned stops, and live road execution tracking."];
 const TITLES: Record<Tab, [string, string]> = {
-  people: PEOPLE, personas: PEOPLE, catalogue: PEOPLE, history: PEOPLE,
+  people: PEOPLE, personas: PEOPLE, policies: PEOPLE, catalogue: PEOPLE, history: PEOPLE,
   actions: ["Actions", "Action catalogue entries."],
   audit: ["Audit console", "Review access changes across the operation."],
   constraints: ["System constraints", "Review and schedule operational rules."],
@@ -179,7 +181,7 @@ export default function AccessDemo({ userId, displayName = "Administrator" }: { 
     if (member?.source === "live" && member.rowVersion !== undefined) {
       setEditingMember(member); setMemberName(member.name); setMemberEmail(member.email); setMemberError(""); return;
     }
-    setToast("Permission editing is unavailable until policy attachments and versioned commands are exposed by the server.");
+    setToast("Change what a role or person may do under People & access, Policies.");
   }
 
   async function saveMember() {
@@ -232,7 +234,7 @@ export default function AccessDemo({ userId, displayName = "Administrator" }: { 
     const targetName = draftMember?.name ?? labelFor(draft.id as Persona);
     const description = (choice: Decision, member: boolean) => choice === "inherit" ? member ? "Use persona access" : "Use published default" : choice === "allow" ? member ? "Allow for this member" : "Allow" : choice === "deny" ? member ? "Block for this member" : "Block" : "Do not grant";
 
-    setToast("Permission editing is unavailable until the server exposes a versioned policy command.");
+    setToast(`${description(draft.choice, draft.target === "member")} for ${targetName} is not saved from here. Change access under People & access, Policies.`);
   }
 
   async function createMember(input: NewMember): Promise<string | null> {
@@ -513,6 +515,7 @@ export default function AccessDemo({ userId, displayName = "Administrator" }: { 
       {toast && <div aria-live="polite" className="mb-5 flex items-center justify-between rounded-2xl border border-[#b7e2c6] bg-[#e9f8ef] px-4 py-3 text-sm"><span>{toast}</span><button aria-label="Dismiss message" className="min-h-11 px-2" onClick={() => setToast("")}>✕</button></div>}
       {route.tab === "people" && <PeopleScreen state={state} selected={route.member} setSelected={(id) => navigate("people", id)} filterPersona={filterPersona} setFilterPersona={setFilterPersona} actions={{ onDetails: showDetails, onEdit: openEditor }} viewer={viewer} onAddMember={() => setNewMemberPersona("dispatcher")} liveConnected={liveConnected} />}
       {route.tab === "personas" && <PersonasScreen state={state} selected={route.persona} setSelected={(id) => navigate("personas", id)} actions={{ onDetails: showDetails, onEdit: openEditor }} viewer={viewer} onMembers={(persona) => { setFilterPersona(persona); navigate("people"); }} onAddMember={(persona) => { if (persona !== "admin" || viewer === "super_admin") setNewMemberPersona(persona); }} roles={rolesList} />}
+      {route.tab === "policies" && <PoliciesScreen />}
       {route.tab === "actions" && <ActionsScreen actions={actionsList} liveConnected={actionsLiveConnected} />}
       {route.tab === "catalogue" && <CatalogueScreen state={state} actions={{ onDetails: showDetails, onEdit: openEditor }} />}
       {route.tab === "history" && <AuditConsole key="permission-history" changes={state.history} viewer={viewer} focused />}

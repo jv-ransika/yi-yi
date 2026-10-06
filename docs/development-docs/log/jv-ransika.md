@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-06 - feat(admin): edit permissions and see why someone has access
+
+`claude/role-ui-intelligence` · @jv-ransika
+
+Permissions were changed from a terminal and the Access tab said "unavailable". People & access now has Policies: every version with its document, a new version from any earlier one, put a version in force, attach and detach to a role or a person, each through the existing versioned policy commands with a confirmation that says who is affected. A person's Access tab shows every action as allowed, blocked or not granted, with the policy, version, statement and role (or direct attachment) that decided it, grants that hold only for some places, and a check of one action on one place (R-IAM-40). The explanation wraps the evaluator rather than repeating it, so it cannot disagree with enforcement. A change that would leave nobody able to change that policy again is refused (R-IAM-39). Detail in the [walkthrough](../../issues/022-admin-console/WALKTHROUGH.md).
+Left: the super-admin boundary and delegation limits of IAM-PLAN, persona toggles over real policies, and a lockout check for disabling the last administrator.
+Verified: `AccessExplanationTest`, `PolicyAccessIntegrationTest` and the full `mvn verify` against a dedicated PostgreSQL; `npm run typecheck`, `npm test` (297), `npm run build`.
+
 ## 2026-10-06 - fix: a holiday declared past the supplied calendar no longer blocks reference additions
 
 `claude/role-ui-intelligence` · @jv-ransika

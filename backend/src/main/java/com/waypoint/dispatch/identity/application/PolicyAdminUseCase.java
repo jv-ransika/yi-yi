@@ -1,6 +1,10 @@
 package com.waypoint.dispatch.identity.application;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.waypoint.dispatch.identity.domain.policy.AccessRequest;
 import com.waypoint.dispatch.identity.domain.policy.Pattern;
+import com.waypoint.dispatch.identity.domain.policy.PolicyEvaluator;
 import com.waypoint.dispatch.identity.domain.policy.PolicyDocument;
 import com.waypoint.dispatch.identity.domain.policy.Statement;
 import com.waypoint.dispatch.identity.infrastructure.JdbcPolicyRepository;
@@ -15,6 +19,8 @@ import com.waypoint.dispatch.shared.domain.Cursor;
 import com.waypoint.dispatch.shared.domain.Page;
 import com.waypoint.dispatch.shared.error.DomainException;
 import com.waypoint.dispatch.shared.error.ErrorCode;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +55,7 @@ public class PolicyAdminUseCase {
   private final PolicyGeneration generation;
   private final AuditLog audit;
   private final Metrics metrics;
+  private final ObjectMapper mapper;
 
   public PolicyAdminUseCase(
       Database database,
@@ -56,19 +63,39 @@ public class PolicyAdminUseCase {
       PolicyDocumentParser parser,
       PolicyGeneration generation,
       AuditLog audit,
-      Metrics metrics) {
+      Metrics metrics,
+      ObjectMapper mapper) {
     this.database = database;
     this.policies = policies;
     this.parser = parser;
     this.generation = generation;
     this.audit = audit;
     this.metrics = metrics;
+    this.mapper = mapper;
   }
 
   /**
    * @param rowVersion what a caller sends back as {@code expectedVersion} to change this policy
    */
   public record PolicySummary(UUID policyId, String name, int defaultVersion, long rowVersion) {}
+
+  /** @param inForce whether this is the default version, the one decisions read */
+  public record VersionView(
+      int versionNumber, boolean inForce, Instant createdAt, String createdBy, JsonNode document) {}
+
+  /** @param label the role's description or the person's name, for a reader, never for matching */
+  public record AttachmentView(
+      String principalType, String principalId, String label, Instant attachedAt) {}
+
+  /** @param rowVersion what a caller sends back as {@code expectedVersion} to change this policy */
+  public record PolicyDetail(
+      UUID policyId,
+      String name,
+      String description,
+      long rowVersion,
+      int defaultVersion,
+      List<VersionView> versions,
+      List<AttachmentView> attachments) {}
 
   UUID applyCreate(Actor actor, String name, String description, String documentJson) {
     validate(documentJson);
@@ -136,6 +163,7 @@ public class PolicyAdminUseCase {
             + " WHERE policy_id = ? AND version_number = ?",
         policyId,
         versionNumber);
+    requireSomeoneCanStillChange(name);
     record(actor, "iam:CreatePolicy", name, "version " + versionNumber + " is now in force");
     generation.advance();
   }
@@ -153,6 +181,8 @@ public class PolicyAdminUseCase {
         principalType,
         principalId,
         actor.userId());
+    // Attaching can take access away too: a policy of Denies fences every Allow.
+    requireSomeoneCanStillChange(name);
     record(actor, "iam:AttachPolicy", name, "attached to " + principalType + " " + principalId);
     generation.advance();
   }
@@ -169,6 +199,7 @@ public class PolicyAdminUseCase {
             policyId,
             principalType,
             principalId);
+    requireSomeoneCanStillChange(name);
     record(
         actor,
         "iam:DetachPolicy",
@@ -213,6 +244,119 @@ public class PolicyAdminUseCase {
                         ((Number) r.get("row_version")).longValue()))
             .toList();
     return Page.fromOverfetch(rows, size, policy -> Cursor.encode(policy.name()));
+  }
+
+  /** One policy with every version it has had and everything it is attached to. */
+  public PolicyDetail detail(String name) {
+    return database.asModule(
+        ModuleRole.IAM,
+        null,
+        () -> {
+          Map<String, Object> policy =
+              database.queryOne(
+                  "SELECT policy_id, name, description, row_version FROM iam.policies WHERE name = ?",
+                  name);
+          if (policy == null) {
+            throw new DomainException(ErrorCode.NOT_FOUND, "No policy named " + name);
+          }
+          UUID policyId = (UUID) policy.get("policy_id");
+          List<VersionView> versions =
+              database
+                  .query(
+                      """
+                      SELECT v.version_number, v.is_default, v.created_at, u.display_name,
+                             v.document::text AS document
+                      FROM iam.policy_versions v
+                      LEFT JOIN iam.users u ON u.user_id = v.created_by
+                      WHERE v.policy_id = ?
+                      ORDER BY v.version_number DESC
+                      """,
+                      policyId)
+                  .stream()
+                  .map(
+                      r ->
+                          new VersionView(
+                              ((Number) r.get("version_number")).intValue(),
+                              Boolean.TRUE.equals(r.get("is_default")),
+                              instant(r.get("created_at")),
+                              (String) r.get("display_name"),
+                              json((String) r.get("document"))))
+                  .toList();
+          List<AttachmentView> attachments =
+              database
+                  .query(
+                      """
+                      SELECT a.principal_type, a.principal_id, a.attached_at,
+                             coalesce(ro.description, u.display_name) AS label
+                      FROM iam.policy_attachments a
+                      LEFT JOIN iam.roles ro
+                        ON a.principal_type = 'role' AND ro.role_code = a.principal_id
+                      LEFT JOIN iam.users u
+                        ON a.principal_type = 'user' AND u.user_id::text = a.principal_id
+                      WHERE a.policy_id = ?
+                      ORDER BY a.principal_type, a.principal_id
+                      """,
+                      policyId)
+                  .stream()
+                  .map(
+                      r ->
+                          new AttachmentView(
+                              (String) r.get("principal_type"),
+                              (String) r.get("principal_id"),
+                              (String) r.get("label"),
+                              instant(r.get("attached_at"))))
+                  .toList();
+          int inForce =
+              versions.stream()
+                  .filter(VersionView::inForce)
+                  .findFirst()
+                  .map(VersionView::versionNumber)
+                  .orElse(0);
+          return new PolicyDetail(
+              policyId,
+              (String) policy.get("name"),
+              (String) policy.get("description"),
+              ((Number) policy.get("row_version")).longValue(),
+              inForce,
+              versions,
+              attachments);
+        });
+  }
+
+  /**
+   * R-IAM-39. A policy change that would leave no active account able to change this
+   * policy back is refused, because nobody could undo it short of editing the
+   * database. Asked of the state the change leaves behind, on the command's own
+   * connection, so it sees the change before it commits; the throw rolls it back.
+   */
+  private void requireSomeoneCanStillChange(String name) {
+    String resource = "wpt:iam:policy:" + name;
+    AccessRequest author = AccessRequest.of("iam:CreatePolicy", resource);
+    AccessRequest attach = AccessRequest.of("iam:AttachPolicy", resource);
+    boolean someone =
+        policies.statementsByActiveUser().values().stream()
+            .anyMatch(
+                statements ->
+                    PolicyEvaluator.evaluate(statements, author).allowed()
+                        && PolicyEvaluator.evaluate(statements, attach).allowed());
+    if (!someone) {
+      metrics.increment("waypoint.policy.lockout_refused");
+      throw new DomainException(
+          ErrorCode.CONFLICT,
+          "This change would leave nobody able to change policy " + name + " again");
+    }
+  }
+
+  private JsonNode json(String document) {
+    try {
+      return mapper.readTree(document);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      throw new IllegalStateException("Stored policy document is not JSON", e);
+    }
+  }
+
+  private static Instant instant(Object value) {
+    return value == null ? null : ((Timestamp) value).toInstant();
   }
 
   /**

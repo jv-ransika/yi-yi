@@ -1,5 +1,6 @@
 package com.waypoint.dispatch.identity.web;
 
+import com.waypoint.dispatch.identity.application.AccessExplanationQuery;
 import com.waypoint.dispatch.identity.application.AccountQuery;
 import com.waypoint.dispatch.platform.web.RequestAuthorizer;
 import com.waypoint.dispatch.platform.web.RequestValues;
@@ -30,10 +31,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/accounts")
 public class AccountAdminController {
   private final AccountQuery accounts;
+  private final AccessExplanationQuery access;
   private final RequestAuthorizer authorizer;
 
-  public AccountAdminController(AccountQuery accounts, RequestAuthorizer authorizer) {
+  public AccountAdminController(
+      AccountQuery accounts, AccessExplanationQuery access, RequestAuthorizer authorizer) {
     this.accounts = accounts;
+    this.access = access;
     this.authorizer = authorizer;
   }
 
@@ -57,6 +61,30 @@ public class AccountAdminController {
     UUID id = RequestValues.uuid("userId", userId);
     authorizer.require(request, "iam:UpdateUser", "wpt:iam:user:" + id);
     return accounts.byId(id);
+  }
+
+  /**
+   * R-IAM-40. What this person may do and why. It reveals which policies reach
+   * them, so it needs the permission to read policy, on this person.
+   */
+  @GetMapping("/{userId}/access")
+  public AccessExplanationQuery.AccessView access(
+      @PathVariable String userId, HttpServletRequest request) {
+    UUID id = RequestValues.uuid("userId", userId);
+    authorizer.require(request, "iam:ReadPolicy", "wpt:iam:user:" + id);
+    return access.forUser(id);
+  }
+
+  /** One action on one resource, answered as a command from this person would be. */
+  @GetMapping("/{userId}/access/check")
+  public AccessExplanationQuery.CheckView check(
+      @PathVariable String userId,
+      @RequestParam String action,
+      @RequestParam(required = false) String resource,
+      HttpServletRequest request) {
+    UUID id = RequestValues.uuid("userId", userId);
+    authorizer.require(request, "iam:ReadPolicy", "wpt:iam:user:" + id);
+    return access.check(id, action, resource);
   }
 
   @GetMapping("/driver-assignments")

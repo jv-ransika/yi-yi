@@ -21,6 +21,11 @@ public record Statement(
     return matchesAction(action) && matchesResource(resource) && conditionsHold(context);
   }
 
+  /** Whether this statement speaks to the action at all, whatever its resources and conditions. */
+  public boolean namesAction(String action) {
+    return matchesAction(action);
+  }
+
   private boolean matchesAction(String action) {
     return actions.stream().anyMatch(p -> p.matches(action));
   }

@@ -5,6 +5,7 @@ import com.waypoint.dispatch.platform.web.RequestAuthorizer;
 import com.waypoint.dispatch.shared.domain.Page;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,5 +43,12 @@ public class PolicyAdminController {
       HttpServletRequest request) {
     authorizer.require(request, "iam:ReadPolicy", "wpt:iam:policy:*");
     return policies.list(after, limit);
+  }
+
+  /** One policy: every version with its document, which is in force, and its attachments. */
+  @GetMapping("/{name}")
+  public PolicyAdminUseCase.PolicyDetail one(@PathVariable String name, HttpServletRequest request) {
+    authorizer.require(request, "iam:ReadPolicy", "wpt:iam:policy:" + name);
+    return policies.detail(name);
   }
 }
