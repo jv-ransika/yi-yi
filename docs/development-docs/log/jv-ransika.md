@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-10-06 - fix: a holiday declared past the supplied calendar no longer blocks reference additions
+
+`claude/role-ui-intelligence` · @jv-ransika
+
+A calendar override past the end of the supplied calendar (a holiday declared ahead, a normal case) made every later `reference:Create*` and `Update*` fail with "Reference addition violates network rules": the lone override day read as a gap in the calendar. Had it passed, the day would also have been written into `ref.calendar_days` as a supplied one. `ManagedReferencePublisher` now validates and writes an addition with the supplied calendar only; readers still see the override (REF-08 in [EDGE-CASES](../../architecture/EDGE-CASES.md)). Found because `ReferenceCreationIntegrationTest` failed whenever `AdministrationIntegrationTest` ran first.
+Verified: full `mvn verify` against a dedicated PostgreSQL, the new `ReferenceCreationIntegrationTest.anOverridePastTheSuppliedCalendarDoesNotBlockAdditions` red without the fix and green with it.
+
 ## 2026-10-05 - fix: a live walk of every role, and what it found
 
 `claude/role-ui-intelligence` · @jv-ransika

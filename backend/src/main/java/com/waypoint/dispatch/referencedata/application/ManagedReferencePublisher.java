@@ -80,7 +80,7 @@ public class ManagedReferencePublisher {
     if (exists(current, kind, id)) throw new DomainException(ErrorCode.CONFLICT, "Identifier already exists");
     JsonNode normalized = payload.deepCopy();
     if (kind.equals("depot")) ((com.fasterxml.jackson.databind.node.ObjectNode) normalized).put("code", id);
-    ReferenceSnapshot next = overlay(current, List.of(new Addition(kind, id, normalized, false)));
+    ReferenceSnapshot next = overlay(suppliedCalendar(current), List.of(new Addition(kind, id, normalized, false)));
     validate(next);
     database.update("INSERT INTO ref.managed_additions (kind, natural_id, payload, created_by) VALUES (?, ?, ?::jsonb, ?)",
         kind, id, normalized.toString(), actor.userId());
@@ -125,7 +125,7 @@ public class ManagedReferencePublisher {
           kind + " " + id + " is at version " + actual + ", not " + expectedVersion);
     }
     JsonNode normalized = payload.deepCopy();
-    ReferenceSnapshot next = overlay(current, List.of(new Addition(kind, id, normalized, true)));
+    ReferenceSnapshot next = overlay(suppliedCalendar(current), List.of(new Addition(kind, id, normalized, true)));
     validate(next);
     if (stored == null) {
       database.update("INSERT INTO ref.managed_updates (kind, natural_id, payload, row_version, updated_by) VALUES (?, ?, ?::jsonb, 1, ?)",
@@ -218,6 +218,25 @@ public class ManagedReferencePublisher {
         List.copyOf(base.allDistricts()), outlets, vehicles,
         List.copyOf(base.allTravelProfiles()), List.copyOf(base.allAllowances()),
         List.copyOf(base.allDays()));
+  }
+
+  /**
+   * The loaded snapshot with the calendar as supplied. The reader lays calendar
+   * overrides on top, and an override may name a date past the supplied calendar
+   * (a holiday declared months ahead). Carried into an addition, that lone day
+   * reads as a gap in the calendar and refuses every addition, and if it passed it
+   * would be written to ref.calendar_days as a supplied day. The calendar is not
+   * versioned (decision D1), so an addition only carries what was supplied.
+   */
+  private ReferenceSnapshot suppliedCalendar(ReferenceSnapshot snapshot) {
+    Object last = database.queryOne("SELECT max(calendar_date) AS last FROM ref.calendar_days").get("last");
+    if (last == null) return snapshot;
+    java.time.LocalDate end = ((java.sql.Date) last).toLocalDate();
+    return new ReferenceSnapshot(snapshot.versionId(), snapshot.brands(),
+        List.copyOf(snapshot.allDepots()), List.copyOf(snapshot.allDistricts()),
+        List.copyOf(snapshot.allOutlets()), List.copyOf(snapshot.allVehicles()),
+        List.copyOf(snapshot.allTravelProfiles()), List.copyOf(snapshot.allAllowances()),
+        snapshot.allDays().stream().filter(day -> !day.date().isAfter(end)).toList());
   }
 
   public void validate(ReferenceSnapshot snapshot) {
