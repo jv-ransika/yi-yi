@@ -1,9 +1,12 @@
 package com.waypoint.dispatch.notification.application;
 
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.DeliveryArrived;
+import com.waypoint.dispatch.execution.contract.ExecutionQuery;
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.DeliveryCompleted;
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.VehicleAtDepot;
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.DeliveryFailed;
+import com.waypoint.dispatch.execution.contract.ExecutionEvents.DeliveryProblemReported;
+import com.waypoint.dispatch.execution.contract.ExecutionEvents.DeliverySkipped;
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.DeliveryStarted;
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.EtaChanged;
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.RoadDisruptionReported;
@@ -15,6 +18,9 @@ import com.waypoint.dispatch.issues.contract.IssueEvents.DecisionExpired;
 import com.waypoint.dispatch.issues.contract.IssueEvents.DecisionRequested;
 import com.waypoint.dispatch.issues.contract.IssueEvents.IssueEscalated;
 import com.waypoint.dispatch.issues.contract.IssueEvents.IssueRaised;
+import com.waypoint.dispatch.issues.contract.IssueEvents.IssueResolved;
+import com.waypoint.dispatch.issues.contract.IssueQuery;
+import com.waypoint.dispatch.issues.contract.IssueViews.IssueView;
 import com.waypoint.dispatch.messaging.contract.MessagingEvents.MessagePosted;
 import com.waypoint.dispatch.loading.contract.LoadingEvents.LoadingShortfall;
 import com.waypoint.dispatch.loading.contract.LoadingEvents.ReleasedStop;
@@ -142,6 +148,20 @@ final class NotificationConsumers {
 
   private static Optional<Subject> subject(String type, Object id) {
     return id == null ? Optional.empty() : Optional.of(new Subject(type, String.valueOf(id)));
+  }
+
+  /**
+   * R-ISS-16: who hears about an issue. {@code loud} is "no" for a quiet goods
+   * problem, which waits for the day's end and does not alert the dispatcher;
+   * {@code forStore} is "no" for the loader's shortfall flag, which the store
+   * never sees. The routing rules (version 16) condition on these facts, so
+   * the quiet types are defined once, in the issues parameters.
+   */
+  private static Routed audience(Routed r, Optional<IssueView> issue,
+      com.waypoint.dispatch.issues.contract.IssueViews.IssueType type) {
+    boolean quiet = issue.map(IssueView::quiet).orElse(false);
+    boolean loaderFlag = type == com.waypoint.dispatch.issues.contract.IssueViews.IssueType.LOADING_SHORTFALL;
+    return r.fact("loud", quiet ? "no" : "yes").fact("forStore", loaderFlag ? "no" : "yes");
   }
 
   /** {@code VEHICLE_FAULT} reads as "vehicle fault". */
@@ -709,10 +729,28 @@ final class NotificationConsumers {
     }
   }
 
+  /**
+   * R-NOT-22: the stores still waiting for a vehicle delayed by a breakdown or a
+   * blocked road, from its run sheet today: the stops not yet done. Stores
+   * already served are not pushed; they read the notice in the trip's room.
+   */
+  static Routed toWaitingStores(Routed routed, ExecutionQuery execution, String vehicleId, java.time.LocalDate day) {
+    execution.runSheet(vehicleId, day).ifPresent(sheet -> sheet.stops().stream()
+        .filter(s -> s.outcome() == com.waypoint.dispatch.execution.contract.ExecutionViews.DeliveryOutcome.PENDING
+            || s.outcome() == com.waypoint.dispatch.execution.contract.ExecutionViews.DeliveryOutcome.ARRIVED)
+        .map(s -> s.outletId())
+        .distinct()
+        .forEach(outlet -> routed.to(ScopeKind.OUTLET, outlet, "vehicle", vehicleId)));
+    return routed;
+  }
+
   @Component
   static class OnVehicleFaultReported extends NotificationConsumer<VehicleFaultReported> {
-    OnVehicleFaultReported(Notifier notifier) {
+    private final ExecutionQuery execution;
+
+    OnVehicleFaultReported(Notifier notifier, ExecutionQuery execution) {
       super(notifier);
+      this.execution = execution;
     }
 
     @Override
@@ -727,18 +765,22 @@ final class NotificationConsumers {
 
     @Override
     Routed route(VehicleFaultReported e) {
-      return new Routed()
+      Routed routed = new Routed()
           .on(e.serviceDate())
           .fact("vehicleId", e.vehicleId()).fact("description", e.description())
-          .fact("serviceDate", e.serviceDate()).fact("depotCode", e.depotCode())
+          .fact("serviceDate", e.serviceDate()).fact("depotCode", e.depotCode()).fact("delay", "breakdown")
           .to(ScopeKind.DEPOT, e.depotCode(), "vehicle", e.vehicleId());
+      return toWaitingStores(routed, execution, e.vehicleId(), e.serviceDate());
     }
   }
 
   @Component
   static class OnRoadDisruptionReported extends NotificationConsumer<RoadDisruptionReported> {
-    OnRoadDisruptionReported(Notifier notifier) {
+    private final ExecutionQuery execution;
+
+    OnRoadDisruptionReported(Notifier notifier, ExecutionQuery execution) {
       super(notifier);
+      this.execution = execution;
     }
 
     @Override
@@ -753,10 +795,11 @@ final class NotificationConsumers {
 
     @Override
     Routed route(RoadDisruptionReported e) {
-      return new Routed()
+      Routed routed = new Routed()
           .fact("vehicleId", e.vehicleId()).fact("districtName", e.districtName())
-          .fact("description", e.description()).fact("depotCode", e.depotCode())
+          .fact("description", e.description()).fact("depotCode", e.depotCode()).fact("delay", "road blocked")
           .to(ScopeKind.DEPOT, e.depotCode(), "vehicle", e.vehicleId());
+      return toWaitingStores(routed, execution, e.vehicleId(), e.at().atZone(Clock.OPERATING_ZONE).toLocalDate());
     }
   }
 
@@ -791,8 +834,11 @@ final class NotificationConsumers {
   /** R-NOT-03: a reported fault, delay, damage or access problem reaches the dispatcher. */
   @Component
   static class OnIssueRaised extends NotificationConsumer<IssueRaised> {
-    OnIssueRaised(Notifier notifier) {
+    private final IssueQuery issues;
+
+    OnIssueRaised(Notifier notifier, IssueQuery issues) {
       super(notifier);
+      this.issues = issues;
     }
 
     @Override
@@ -807,11 +853,134 @@ final class NotificationConsumers {
 
     @Override
     Routed route(IssueRaised e) {
-      return new Routed()
+      return audience(new Routed(), issues.issue(e.issueId()), e.issueType())
           .fact("issueType", words(e.issueType())).fact("severity", words(e.severity()))
           .fact("depotCode", e.depotCode()).fact("outletId", e.outletId())
           .to(ScopeKind.DEPOT, e.depotCode(), "issue", e.issueId())
           .to(ScopeKind.OUTLET, e.outletId(), "issue", e.issueId());
+    }
+  }
+
+  /**
+   * R-EXE-31, R-NOT-20: the dispatcher took a stop off a trip on the road. The
+   * store hears what happens to its delivery and why; the vehicle's driver hears
+   * the stop is gone, so the route on the phone is not trusted from memory.
+   */
+  @Component
+  static class OnDeliverySkipped extends NotificationConsumer<DeliverySkipped> {
+    OnDeliverySkipped(Notifier notifier) {
+      super(notifier);
+    }
+
+    @Override
+    public String consumerName() {
+      return "notification.on-delivery-skipped";
+    }
+
+    @Override
+    public Class<DeliverySkipped> eventType() {
+      return DeliverySkipped.class;
+    }
+
+    @Override
+    Routed route(DeliverySkipped e) {
+      String headline =
+          "CANCEL".equals(e.then()) ? "Today's delivery is cancelled" : "Your delivery moves to the next day";
+      return new Routed()
+          .fact("headline", headline).fact("reason", e.reason()).fact("outletId", e.outletId())
+          .fact("vehicleId", e.vehicleId()).fact("depotCode", e.depotCode())
+          .on(e.serviceDate())
+          .to(ScopeKind.OUTLET, e.outletId(), "delivery", e.deliveryId())
+          .to(ScopeKind.VEHICLE, e.vehicleId(), "delivery", e.deliveryId());
+    }
+  }
+
+  /**
+   * R-NOT-21: a driver's closed store or stop that cannot unload reaches the
+   * depot's dispatchers, who decide (R-EXE-32), and the store, told the dispatcher
+   * decides. Never the driver's own words: only the kind of problem.
+   */
+  @Component
+  static class OnDeliveryProblemReported extends NotificationConsumer<DeliveryProblemReported> {
+    OnDeliveryProblemReported(Notifier notifier) {
+      super(notifier);
+    }
+
+    @Override
+    public String consumerName() {
+      return "notification.on-delivery-problem-reported";
+    }
+
+    @Override
+    public Class<DeliveryProblemReported> eventType() {
+      return DeliveryProblemReported.class;
+    }
+
+    @Override
+    Routed route(DeliveryProblemReported e) {
+      boolean unload = "CANNOT_UNLOAD".equals(e.problem());
+      return new Routed()
+          .fact("problem", unload ? "Cannot unload" : "Store closed")
+          .fact("headline", unload ? "The driver cannot unload at your store" : "The driver found your store closed")
+          .fact("outletId", e.outletId()).fact("vehicleId", e.vehicleId()).fact("depotCode", e.depotCode())
+          .on(e.serviceDate())
+          .to(ScopeKind.DEPOT, e.depotCode(), "delivery", e.deliveryId())
+          .to(ScopeKind.OUTLET, e.outletId(), "delivery", e.deliveryId());
+    }
+  }
+
+  /**
+   * R-NOT-19: the store hears that an issue at its outlet is resolved, and what
+   * was done, so it is not left reading "Sent" on a problem the dispatcher has
+   * closed. The dispatcher who resolved it is the author and is not told (R-NOT-07).
+   */
+  @Component
+  static class OnIssueResolved extends NotificationConsumer<IssueResolved> {
+    private final IssueQuery issues;
+
+    OnIssueResolved(Notifier notifier, IssueQuery issues) {
+      super(notifier);
+      this.issues = issues;
+    }
+
+    @Override
+    public String consumerName() {
+      return "notification.on-issue-resolved";
+    }
+
+    @Override
+    public Class<IssueResolved> eventType() {
+      return IssueResolved.class;
+    }
+
+    @Override
+    Routed route(IssueResolved e) {
+      Optional<IssueView> issue = issues.issue(e.issueId());
+      // The dispatcher's own words when there are any, else what the outcome means.
+      String outcome =
+          issue.flatMap(IssueView::resolutionNote).filter(n -> !n.isBlank())
+              .orElse(outcomeWords(e.action()));
+      // "Receipt dispute: Written off"; just the outcome when the issue cannot be read.
+      Optional<String> type = issue.map(i -> sentence(words(i.type())));
+      return audience(new Routed(), issue, issue.map(IssueView::type).orElse(null))
+          .fact("issueType", type).fact("outcome", outcome)
+          .fact("summary", type.map(t -> t + ": " + outcome).orElse(outcome))
+          .fact("outletId", e.outletId()).fact("depotCode", e.depotCode())
+          .to(ScopeKind.OUTLET, e.outletId(), "issue", e.issueId());
+    }
+
+    private static String outcomeWords(String action) {
+      return switch (action) {
+        case "REPLACEMENT" -> "A replacement was loaded";
+        case "REDELIVERY" -> "A new delivery is arranged";
+        case "WRITE_OFF" -> "Written off";
+        case "NO_FAULT_FOUND" -> "No fault was found";
+        default -> "Resolved by the dispatcher";
+      };
+    }
+
+    private static String sentence(String words) {
+      return words.isEmpty() ? words : Character.toUpperCase(words.charAt(0)) + words.substring(1);
     }
   }
 
@@ -1058,8 +1227,11 @@ final class NotificationConsumers {
   /** R-ISS-06: an issue waited unassigned past its severity's deadline. */
   @Component
   static class OnIssueEscalated extends NotificationConsumer<IssueEscalated> {
-    OnIssueEscalated(Notifier notifier) {
+    private final IssueQuery issues;
+
+    OnIssueEscalated(Notifier notifier, IssueQuery issues) {
       super(notifier);
+      this.issues = issues;
     }
 
     @Override
@@ -1074,7 +1246,7 @@ final class NotificationConsumers {
 
     @Override
     Routed route(IssueEscalated e) {
-      return new Routed()
+      return audience(new Routed(), issues.issue(e.issueId()), e.issueType())
           .fact("issueType", words(e.issueType())).fact("severity", words(e.severity()))
           .fact("waitedMinutes", e.waitedMinutes()).fact("depotCode", e.depotCode())
           .to(ScopeKind.DEPOT, e.depotCode(), "issue", e.issueId())

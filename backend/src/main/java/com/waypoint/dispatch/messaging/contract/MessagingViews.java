@@ -79,7 +79,19 @@ public final class MessagingViews {
       Optional<Boolean> seenByDriver,
       Optional<Instant> seenByDriverAt,
       /** FF-05: a voice note's machine transcript; empty for a typed message. */
-      Optional<TranscriptView> transcript) {
+      Optional<TranscriptView> transcript,
+      /**
+       * The issue a report was made from (R-MSG-05). Resolving that report is
+       * resolving the issue (R-MSG-07), so the dispatcher's screen acts on the
+       * issue; empty for a message a person wrote.
+       */
+      Optional<UUID> issueId,
+      /**
+       * The stop a report is about (a store's own outlet, or the issue's), so the
+       * dispatcher can act on that stop beside the report (R-EXE-31); empty for a
+       * message, or a report about no stop.
+       */
+      Optional<String> aboutOutletId) {
     public MessageView {
       voicePeaks = List.copyOf(voicePeaks);
     }
@@ -93,8 +105,10 @@ public final class MessagingViews {
    *     with the words, or {@code none} when there is no transcript (no engine,
    *     the engine failed, or the words were cleared with the audio): play the audio
    * @param language en, si or ta, as the engine named it
+   * @param audioKept false once the note's audio passed its retention and only the
+   *     words are left (R-MSG-15): the screen says the audio is no longer kept
    */
-  public record TranscriptView(String status, Optional<String> text, Optional<String> language) {}
+  public record TranscriptView(String status, Optional<String> text, Optional<String> language, boolean audioKept) {}
 
   /** A page of messages, newest first; {@code nextCursor} reads older ones. */
   public record MessagePage(List<MessageView> items, Optional<String> nextCursor) {

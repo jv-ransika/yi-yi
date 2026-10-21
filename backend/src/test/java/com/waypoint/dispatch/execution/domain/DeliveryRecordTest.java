@@ -45,6 +45,17 @@ class DeliveryRecordTest {
   // ---- arrival: waiting and lateness ----
 
   @Test
+  void aClosedStoreOrABlockedStopIsReportedAndAReportedStopIsTheDispatchers() {
+    // R-EXE-32: the driver reports these; the dispatcher's Skip store ends the stop.
+    Optional<String> note = Optional.of("back to the depot");
+    assertEquals("R-EXE-32", rule(() -> stop().fail(FailureReason.OUTLET_CLOSED, note, at("08:30"))));
+    assertEquals("R-EXE-32", rule(() -> stop().fail(FailureReason.ACCESS_BLOCKED, note, at("08:30"))));
+    assertEquals("R-EXE-32", rule(() -> stop().fail(FailureReason.REFUSED, note, at("08:30"), true)));
+    assertEquals(DeliveryOutcome.FAILED, stop().fail(FailureReason.REFUSED, note, at("08:30"), false).outcome());
+    assertEquals(StopProblem.CANNOT_UNLOAD, StopProblem.parse(" cannot_unload "));
+  }
+
+  @Test
   void anEarlyArrivalWaitsAndServiceStartsWhenTheWindowOpens() {
     // EXE-05, EXE-18, R-EXE-04
     DeliveryRecord arrived = stop().arrive(at("07:25"), Optional.empty());
@@ -250,6 +261,39 @@ class DeliveryRecordTest {
     assertEquals(DeliveryRecord.REPLANNED, skipped.failureReason().orElseThrow());
 
     assertEquals("R-EXE-01", rule(() -> stop().arrive(at("09:00"), Optional.empty()).skip(at("09:05"))));
+  }
+
+  @Test
+  void theDispatcherSkipsAStopNotYetDoneReachedOrNot() {
+    // R-EXE-31: a store closed with the van at the door is skipped from ARRIVED.
+    DeliveryRecord pending = stop().skipByDispatcher(at("08:50"));
+    assertEquals(DeliveryOutcome.SKIPPED, pending.outcome());
+    assertEquals(DeliveryRecord.SKIPPED_BY_DISPATCHER, pending.failureReason().orElseThrow());
+    assertEquals(at("08:50"), pending.completedAt().orElseThrow());
+
+    DeliveryRecord reached = stop().arrive(at("09:00"), Optional.empty()).skipByDispatcher(at("09:20"));
+    assertEquals(DeliveryOutcome.SKIPPED, reached.outcome());
+    assertEquals(at("09:00"), reached.arrivedAt().orElseThrow(), "the arrival stands beside the skip");
+  }
+
+  @Test
+  void aStopAlreadyDeliveredFailedOrSkippedCannotBeSkipped() {
+    DeliveryRecord delivered = stop().arrive(at("09:00"), Optional.empty())
+        .complete(DeliveryOutcome.DELIVERED, Optional.empty(), Optional.empty(), Optional.empty(), at("09:20"));
+    assertEquals("R-EXE-01", rule(() -> delivered.skipByDispatcher(at("09:30"))));
+    DeliveryRecord skipped = stop().skipByDispatcher(at("08:50"));
+    assertEquals("R-EXE-01", rule(() -> skipped.skipByDispatcher(at("08:55"))));
+    assertEquals("R-EXE-01", rule(() -> skipped.arrive(at("09:00"), Optional.empty())), "the driver's write is refused");
+  }
+
+  @Test
+  void aSkipSaysWhatThenAndWhyInThreeTo500Characters() {
+    assertEquals(StopSkip.Then.NEXT_DAY, StopSkip.Then.parse(" next_day "));
+    assertEquals(StopSkip.Then.CANCEL, StopSkip.Then.parse("CANCEL"));
+    assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(DomainException.class, () -> StopSkip.Then.parse("later")).code());
+    assertEquals("Store closed", StopSkip.reason("  Store closed "));
+    assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(DomainException.class, () -> StopSkip.reason("no")).code());
+    assertEquals(ErrorCode.VALIDATION_FAILED, assertThrows(DomainException.class, () -> StopSkip.reason("x".repeat(501))).code());
   }
 
   // ---- proof ----

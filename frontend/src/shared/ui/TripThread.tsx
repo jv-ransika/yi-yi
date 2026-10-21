@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/problem.ts";
-import { redirectMessage, resolveReport, useThread, useWaiting } from "../messaging/useThread.ts";
+import { redirectMessage, resolveIssueReport, resolveReport, useThread, useWaiting } from "../messaging/useThread.ts";
 import { audienceLabel, plain, type Translate } from "../messaging/thread.ts";
 import type { Sender } from "../messaging/senders.ts";
 import { clock } from "../wording/time.ts";
@@ -31,6 +31,7 @@ export function TripThread({
   replies,
   repliesNote,
   playAll = false,
+  reportActions,
   tr = plain,
 }: {
   threadId: string;
@@ -49,6 +50,8 @@ export function TripThread({
   repliesNote?: string;
   /** A "Play messages" bar for the messages not heard yet (the driver's, when stopped). */
   playAll?: boolean;
+  /** The dispatcher's decisions beside a report (R-EXE-31). */
+  reportActions?: (message: import("../domain/messaging.ts").MessageView) => React.ReactNode;
   /** The reader's language; English when absent. */
   tr?: Translate;
 }): React.JSX.Element {
@@ -78,7 +81,8 @@ export function TripThread({
         </Notice>
       )}
       {playAll && t.loadedAt !== null && <PlayMessages threadId={threadId} messages={t.messages} tr={tr} {...(accountId ? { accountId } : {})} />}
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1" aria-live="polite" aria-busy={t.thread.loading}>
+      {/* Padded on both sides: a focused message's outline sits 4px outside it, and the scroll box would clip it. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-1" aria-live="polite" aria-busy={t.thread.loading}>
         {t.loadedAt === null && t.error === null ? (
           <p className="py-8 text-center text-sm text-go-secondary">{tr("Loading messages…")}</p>
         ) : (
@@ -90,10 +94,12 @@ export function TripThread({
             compact={variant === "phone"}
             tr={tr}
             {...(accountId ? { accountId } : {})}
+            {...(thread?.memberRole === "dispatcher" && reportActions ? { reportActions } : {})}
             {...(thread?.memberRole === "dispatcher"
               ? {
                   onResolve: async (messageId: string, note: string) => {
-                    await resolveReport(messageId, note);
+                    const issueId = t.messages.find((m) => m.messageId === messageId)?.issueId ?? null;
+                    await (issueId ? resolveIssueReport(issueId, messageId, note) : resolveReport(messageId, note));
                     t.refresh();
                   },
                   onRedirect: async (messageId: string, reason: string) => {

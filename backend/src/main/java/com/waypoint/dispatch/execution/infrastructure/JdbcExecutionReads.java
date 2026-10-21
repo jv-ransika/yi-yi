@@ -24,11 +24,17 @@ public class JdbcExecutionReads {
              d.server_recorded_at, d.row_version, d.released_at, d.trip_stop_count,
              (SELECT w.reason FROM execution.store_answer_waivers w WHERE w.delivery_id = d.delivery_id)
                AS store_answer_waived,
+             s.then_action AS skip_then, s.reason AS skip_reason, s.whole_trip AS skip_whole_trip,
+             s.decided_at AS skipped_at,
+             (SELECT p.problem FROM execution.stop_problems p
+               WHERE p.delivery_id = d.delivery_id AND NOT p.after_finish
+               ORDER BY p.reported_at DESC LIMIT 1) AS reported_problem,
              (SELECT coalesce(json_agg(json_build_object(
                          'productId', l.product_id, 'orderedUnits', l.ordered_units,
                          'deliveredUnits', l.delivered_units) ORDER BY l.product_id), '[]')::text
                 FROM execution.delivery_lines l WHERE l.delivery_id = d.delivery_id) AS lines
         FROM execution.delivery_records d
+        LEFT JOIN execution.stop_skips s ON s.delivery_id = d.delivery_id
       """;
 
   private final Database database;

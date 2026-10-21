@@ -8,6 +8,7 @@ import { useFuel } from "../data/useDay.ts";
 import { driverLine, useDriver } from "./LivePanel.tsx";
 import { Bar, Chip, STATUS } from "./LiveParts.tsx";
 import LiveTripUpdate from "./LiveTripUpdate.tsx";
+import { EndTripButton, SkipStopButton, skippable } from "./LiveTripSkip.tsx";
 
 // Figma "05 Live · trip" (189:21943), opened from "Open trip": the driver, the
 // trip's limits right now, its stops and what each outlet was told, what has
@@ -36,7 +37,9 @@ export default function LiveTrip({
   const look = STATUS[run.status];
   const next = run.day.current;
   const quiet = silentMinutes(run, now);
-  const waiting = run.day.stops.filter((s) => s.outcome === "PENDING" || s.outcome === "ARRIVED");
+  const waiting = run.day.stops.filter(skippable);
+  // End trip ends the trip under way, not the vehicle's later trip of the day.
+  const tripId = (next ?? waiting[0])?.tripId ?? null;
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -49,6 +52,7 @@ export default function LiveTrip({
           <p className="text-[14px] text-go-secondary">{driverLine(run, name) || `${run.day.done} of ${run.day.stops.length} stops done`}</p>
         </div>
         <div className="flex items-center gap-3">
+          {tripId && <EndTripButton tripId={tripId} open={waiting.filter((s) => s.tripId === tripId)} online={online} />}
           <Chip tone={look.tone}>{`${look.label}${next && run.status !== "on-time" ? ` · ${next.outletId}` : ""}`}</Chip>
           <ConnectionStatus online={online} lastSyncedAt={lastSyncedAt} offlineNote="read only" />
         </div>
@@ -57,8 +61,9 @@ export default function LiveTrip({
       <div className="grid w-full items-start gap-4 lg:grid-cols-[280px_1fr_300px]">
         <div className="flex flex-col gap-4">
           <Card>
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-[15px] font-medium text-go-ink">{name ?? "Driver"}</h2>
+            {/* The name and its staff number stay on one line; the ping chip wraps below instead. */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="whitespace-nowrap text-[15px] font-medium text-go-ink">{name ?? "Driver"}</h2>
               {run.position && <Chip tone="muted">{`${run.status === "offline" ? "Last seen" : "Last ping"} ${clockOn(run.position.recordedAt)}`}</Chip>}
             </div>
             <p className="text-[14px] text-go-ink">{next ? `On the way to ${next.outletId}` : run.status === "returning" ? `Returning to ${depotName}` : "Run finished"}</p>
@@ -104,11 +109,12 @@ export default function LiveTrip({
           <table className="w-full text-left text-[13px]">
             <thead>
               <tr className="border-b border-go-rule text-[12px] text-go-secondary">
-                <th className="py-2 font-normal">Outlet</th>
-                <th className="py-2 font-normal">Expected</th>
-                <th className="py-2 font-normal">Status</th>
-                <th className="py-2 font-normal">Told</th>
-                <th className="py-2 font-normal">Response</th>
+                <th className="py-2 pr-3 font-normal">Outlet</th>
+                <th className="py-2 pr-3 font-normal">Expected</th>
+                <th className="py-2 pr-3 font-normal">Status</th>
+                <th className="py-2 pr-3 font-normal">Told</th>
+                <th className="py-2 pr-3 font-normal">Response</th>
+                <th className="py-2 pr-3 font-normal"><span className="sr-only">Action</span></th>
               </tr>
             </thead>
             <tbody>
@@ -116,14 +122,17 @@ export default function LiveTrip({
                 const st = stopStatus(s, run, next);
                 return (
                   <tr key={s.deliveryId} className={cx("border-b border-go-rule last:border-0", st.done && "text-go-secondary")}>
-                    <td className="py-3 font-semibold text-go-ink">
+                    <td className="whitespace-nowrap py-3 pr-3 font-semibold text-go-ink">
                       <span aria-hidden className={cx("mr-2 inline-block size-2 rounded-full", st.dot)} />
                       {s.outletId}
                     </td>
-                    <td className="py-3 tabular-nums">{etaOf(s)}</td>
-                    <td className={cx("py-3", st.text)}>{st.label}</td>
-                    <td className="py-3 text-go-secondary">-</td>
-                    <td className="py-3 text-go-secondary">-</td>
+                    <td className="py-3 pr-3 tabular-nums">{etaOf(s)}</td>
+                    <td className={cx("py-3 pr-3", st.text)}>{st.label}</td>
+                    <td className="py-3 pr-3 text-go-secondary">-</td>
+                    <td className="py-3 pr-3 text-go-secondary">-</td>
+                    <td className="py-3 text-right">
+                      <SkipStopButton stop={s} online={online} />
+                    </td>
                   </tr>
                 );
               })}
@@ -172,7 +181,15 @@ function stopStatus(s: RunSheetStopView, run: Run, next: RunSheetStopView | null
   if (s.outcome === "DELIVERED") return { label: (s.lateMinutes ?? 0) > 0 ? `Delivered · ${s.lateMinutes} min late` : "Delivered", dot: "bg-go-teal", text: "text-go-teal", done: true };
   if (s.outcome === "PARTIAL") return { label: "Partly delivered", dot: "bg-[#c08a3e]", text: "text-go-warning-text", done: true };
   if (s.outcome === "FAILED") return { label: "Not delivered", dot: "bg-go-danger", text: "text-go-danger-strong", done: true };
-  if (s.outcome === "SKIPPED") return { label: "Replanned", dot: "bg-go-divider", text: "text-go-secondary", done: true };
+  // A plan revision, or the dispatcher's Skip store or End trip (R-EXE-31), with whether the driver has
+  // read the push: a driver with no signal may still be driving there, so the dispatcher phones.
+  if (s.outcome === "SKIPPED") {
+    if (!s.skip) return { label: "Off the trip", dot: "bg-go-divider", text: "text-go-secondary", done: true };
+    const what = s.skip.then === "CANCEL" ? "cancelled" : "next day";
+    if (s.skip.seenByDriver === false) return { label: `Off the trip · ${what} · not seen by the driver yet`, dot: "bg-[#c08a3e]", text: "text-go-warning-text", done: true };
+    const seen = s.skip.seenByDriverAt ? ` · seen by the driver ${clockOn(s.skip.seenByDriverAt)}` : "";
+    return { label: `Off the trip · ${what}${seen}`, dot: "bg-go-divider", text: "text-go-secondary", done: true };
+  }
   if (s.outcome === "ARRIVED") return { label: "At the stop", dot: "bg-go-info", text: "text-go-info", done: false };
   if (next?.deliveryId === s.deliveryId && (run.status === "at-risk" || run.status === "late")) return { label: "At risk", dot: "bg-[#c08a3e]", text: "text-go-warning-text", done: false };
   return { label: "Planned", dot: "bg-go-divider", text: "text-go-ink", done: false };

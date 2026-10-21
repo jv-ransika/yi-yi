@@ -174,6 +174,8 @@ export function useDriver(userId: string, depot: string | null = null) {
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [problemFor, setProblemFor] = useState<Stop | "run" | null>(null);
+  /** After a stop report (R-EXE-32): what to say on the route once the sent card closes. */
+  const afterReport = useRef<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [working, setWorking] = useState(false);
   const [vehicleStatus, setVehicleStatus] = useState<ReportedVehicleStatus | null>(null);
@@ -200,12 +202,13 @@ export function useDriver(userId: string, depot: string | null = null) {
   // A stop, its report or the map slides in; Home or the route slides back from them (UX polish 4).
   const current = useRef(view.name);
   current.current = view.name;
-  const go = useCallback((next: View) => {
+  /** @param notice said on the new screen, which otherwise opens with none */
+  const go = useCallback((next: View, notice: string | null = null) => {
     const detail = (name: View["name"]) => name === "stop" || name === "report" || name === "map";
     const direction = detail(next.name) ? "forward" : (next.name === "home" || next.name === "route") && detail(current.current) ? "back" : "tab";
     withTransition(() => {
       setError(null);
-      setNotice(null);
+      setNotice(notice);
       setView(next);
       window.scrollTo({ top: 0 });
     }, direction);
@@ -378,13 +381,28 @@ export function useDriver(userId: string, depot: string | null = null) {
         setError(words(recorded));
         return false;
       }
+      // Goods damaged with some handed over: a quiet goods problem for the end of the day
+      // (R-ISS-16), sent or kept on the phone like the record. A failure here does not undo
+      // the delivery; the driver is told.
+      let damageWarning: string | null = null;
+      if (report.damaged && depot) {
+        const raised = await act("issue:Raise", {
+          type: "DAMAGED_GOODS",
+          severity: "MEDIUM",
+          depotCode: depot,
+          outletId: stop.outletId,
+          subjects: [{ type: "delivery", id: stop.deliveryId }, { type: "order", id: stop.orderId }],
+          description: `Damaged at delivery: ${stop.itemCount - record.deliveredUnits} of ${stop.itemCount} units not usable`,
+        });
+        if (!raised.ok) damageWarning = t("The delivery is recorded, but the damaged goods were not reported. Tell the dispatcher.");
+      }
       // The record moved the stop's version on by one, sent or waiting.
       const proven = report.proof ? await captureProof(stop, stop.rowVersion + 1, report.proof) : null;
       setSaved({
         title: record.outcome === "DELIVERED" ? t("Delivery confirmed") : record.outcome === "PARTIAL" ? t("Partial delivery recorded") : t("Recorded as not delivered"),
         onPhone: recorded.queued || (proven?.ok === true && proven.queued),
         last: stops.every((other) => other.deliveryId === stop.deliveryId || isFinished(other)),
-        warning: proven && !proven.ok ? `The delivery is recorded, but its proof was not: ${proven.error.message} Open the stop from Home to add it.` : null,
+        warning: proven && !proven.ok ? `The delivery is recorded, but its proof was not: ${proven.error.message} Open the stop from Home to add it.` : damageWarning,
         handedOver: record.outcome === "FAILED" ? null : stop,
       });
       return true;
@@ -419,6 +437,22 @@ export function useDriver(userId: string, depot: string | null = null) {
     if (problem.kind === "not-delivered") {
       setProblemFor(null);
       if (stop) go({ name: "report", deliveryId: stop.deliveryId, failed: problem.reason });
+      return true;
+    }
+    if (problem.kind === "stop") {
+      if (!stop) return false;
+      setError(null);
+      // No version: a report leaves the stop as it is. Kept on the phone with no signal.
+      const sent = await act(DeliveryKind.problem, { deliveryId: stop.deliveryId, problem: problem.problem });
+      if (!sent.ok) {
+        setError(words(sent));
+        return false;
+      }
+      // The sheet says "Report sent"; when it closes, on to the route, where the next
+      // stop is chosen past this one (R-EXE-32), with what to do now.
+      afterReport.current = sent.queued
+        ? t("Saved on this phone. Call the dispatcher: they decide about this stop. Go on to your next stop.")
+        : t("The dispatcher decides about this stop. Go on to your next stop.");
       return true;
     }
     if (!run.vehicle) return false;
@@ -553,6 +587,9 @@ export function useDriver(userId: string, depot: string | null = null) {
     closeProblem: () => {
       setProblemFor(null);
       setError(null);
+      const told = afterReport.current;
+      afterReport.current = null;
+      if (told) go({ name: "route", deliveryId: null }, told);
     },
     askSignOut: () => setLeaving(true),
     cancelSignOut: () => setLeaving(false),

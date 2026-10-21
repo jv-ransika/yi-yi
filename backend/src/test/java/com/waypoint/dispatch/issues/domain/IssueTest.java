@@ -108,17 +108,23 @@ class IssueTest {
   @Test
   void aReplacementOnlyAnswersALoadingShortfallAboutThatTripAndOrder() {
     Issue shortfall = raise(IssueType.LOADING_SHORTFALL, false);
-    Issue done = shortfall.recordReplacement(trip, order, "replacement carton loaded", DISPATCHER, RAISED);
+    Issue done = shortfall.recordReplacement(trip, order, false, "replacement carton loaded", DISPATCHER, RAISED);
     assertEquals(ResolutionAction.REPLACEMENT, done.resolution().orElseThrow().action());
 
     assertEquals(
         ErrorCode.CONFLICT,
         assertThrows(DomainException.class,
-            () -> raise(IssueType.DAMAGED_GOODS, false).recordReplacement(trip, order, "x x", DISPATCHER, RAISED))
+            () -> raise(IssueType.DAMAGED_GOODS, false).recordReplacement(trip, order, false, "x x", DISPATCHER, RAISED))
             .code());
     assertThrows(
         DomainException.class,
-        () -> shortfall.recordReplacement(UUID.randomUUID(), order, "wrong trip", DISPATCHER, RAISED));
+        () -> shortfall.recordReplacement(UUID.randomUUID(), order, false, "wrong trip", DISPATCHER, RAISED));
+    // R-ISS-17: once the vehicle has left, nothing more is loaded on it.
+    assertEquals(
+        List.of("R-ISS-17"),
+        assertThrows(DomainException.class,
+            () -> shortfall.recordReplacement(trip, order, true, "found at the depot", DISPATCHER, RAISED))
+            .rules());
   }
 
   @Test
@@ -196,9 +202,19 @@ class IssueTest {
       parameters.put(SeverityPolicy.DEADLINE_PREFIX + s.name(), "60");
     }
     parameters.put(SeverityPolicy.DEFAULT_PREFIX + "VEHICLE_FAULT", "CRITICAL");
+    parameters.put(SeverityPolicy.QUIET_KEY, " damaged_goods, LOADING_SHORTFALL ");
     SeverityPolicy policy = SeverityPolicy.from(parameters);
     assertEquals(IssueSeverity.CRITICAL, policy.defaultFor(IssueType.VEHICLE_FAULT));
     assertEquals(Duration.ofMinutes(60), policy.deadline(IssueSeverity.LOW));
+    // R-ISS-16: the quiet goods problems are read from the same dated parameters.
+    assertTrue(policy.isQuiet(IssueType.DAMAGED_GOODS));
+    assertTrue(policy.isQuiet(IssueType.LOADING_SHORTFALL));
+    assertFalse(policy.isQuiet(IssueType.VEHICLE_FAULT));
+    parameters.put(SeverityPolicy.QUIET_KEY, "none");
+    assertFalse(SeverityPolicy.from(parameters).isQuiet(IssueType.DAMAGED_GOODS));
+    parameters.put(SeverityPolicy.QUIET_KEY, "BROKEN_THINGS");
+    assertEquals(List.of("POL-10"), assertThrows(DomainException.class, () -> SeverityPolicy.from(parameters)).rules());
+    parameters.put(SeverityPolicy.QUIET_KEY, "none");
 
     parameters.remove(SeverityPolicy.DEADLINE_PREFIX + "LOW");
     DomainException refused = assertThrows(DomainException.class, () -> SeverityPolicy.from(parameters));

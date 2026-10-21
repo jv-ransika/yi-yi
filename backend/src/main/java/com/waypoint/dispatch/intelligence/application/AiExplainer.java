@@ -66,9 +66,12 @@ public class AiExplainer {
   private final Clock clock;
   private final SecureRandom random = new SecureRandom();
 
+  private final KnownNames knownNames;
+
   public AiExplainer(
       AiProperties properties, LanguageModel model, JdbcAiCalls calls, PlanQuery plans, Database database,
-      ObjectMapper json, Metrics metrics, Clock clock) {
+      ObjectMapper json, Metrics metrics, Clock clock, KnownNames knownNames) {
+    this.knownNames = knownNames;
     this.properties = properties;
     this.model = model;
     this.calls = calls;
@@ -107,16 +110,24 @@ public class AiExplainer {
     if (allowed.isEmpty()) {
       return Worded.rulesOnly();
     }
+    // R-ML-31: our people's names become [person-N] here and come back only on our side.
+    Optional<com.waypoint.dispatch.intelligence.domain.PromptNames> names = knownNames.current();
+    if (names.isEmpty()) {
+      return Worded.rulesOnly();
+    }
+    com.waypoint.dispatch.intelligence.domain.PromptNames.Session people = names.get().session();
     String sent;
     try {
-      sent = json.writeValueAsString(allowed);
+      sent = json.writeValueAsString(people.maskValues(allowed));
     } catch (JsonProcessingException e) {
       return Worded.rulesOnly();
     }
+    java.util.function.UnaryOperator<String> back =
+        text -> com.waypoint.dispatch.intelligence.domain.PromptNames.restore(text, people.tokens());
     String cacheKey = key.length() > 200 ? key.substring(0, 200) : key;
     Optional<String> had = database.asSystem(ModuleRole.ML, () -> calls.usedAnswer(cacheKey));
     if (had.isPresent()) {
-      return new Worded("worded", had);
+      return new Worded("worded", had.map(back));
     }
     Instant now = clock.now();
     Instant dayStart = now.atZone(Clock.OPERATING_ZONE).toLocalDate().atStartOfDay(Clock.OPERATING_ZONE).toInstant();
@@ -133,13 +144,14 @@ public class AiExplainer {
     String outcome = raw.isEmpty() ? "failed" : used.isEmpty() ? "unfaithful" : "used";
     record(cacheKey, kind, sent, used, outcome, actor, now, millis);
     metrics.increment("waypoint.ai.explain", "outcome", outcome);
-    return used.map(text -> new Worded("worded", Optional.of(text))).orElseGet(Worded::rulesOnly);
+    return used.map(text -> new Worded("worded", Optional.of(back.apply(text)))).orElseGet(Worded::rulesOnly);
   }
 
   private void record(
       String cacheKey, Kind kind, String sent, Optional<String> answer, String outcome, Actor actor, Instant at, long millis) {
     database.asSystem(ModuleRole.ML, () -> calls.record(
         UuidV7.generate(at, random), "explain_" + kind.name().toLowerCase(java.util.Locale.ROOT), cacheKey,
-        model.provider(), model.model(), sent, answer, outcome, actor.userId(), at, millis));
+        model.provider(), model.model(), sent, answer, outcome, actor.userId(), at, millis,
+        PromptFacts.version(INSTRUCTION)));
   }
 }

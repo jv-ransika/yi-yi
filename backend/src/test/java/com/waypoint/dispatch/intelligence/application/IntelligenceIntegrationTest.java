@@ -86,6 +86,7 @@ class IntelligenceIntegrationTest {
     registry.add("app.ai.enabled", () -> "true");
     registry.add("app.ai.groq-key", () -> "test-only");
     registry.add("app.ai.jev-enabled", () -> "true");
+    registry.add("app.ai.watch-review", () -> "true");
     registry.add("app.ai.openrouter-key", () -> "test-only");
   }
 
@@ -150,6 +151,8 @@ class IntelligenceIntegrationTest {
   @Autowired com.waypoint.dispatch.intelligence.infrastructure.JdbcAttentionRepository attentionItems;
   @Autowired AttentionWatchJob attentionWatch;
   @Autowired JevShadow.Job jevJob;
+  @Autowired KnownNames knownNames;
+  @Autowired WatchReviewJob watchReview;
   @Autowired ModelMetricsJob metricsJob;
   @Autowired FallbackTuningJob tuningJob;
   @Autowired ModelQualityJob qualityJob;
@@ -490,6 +493,17 @@ class IntelligenceIntegrationTest {
     assertEquals(10.5, rows.get(0).get("totalVolumeM3").asDouble(), 1e-9);
     assertEquals(2.25, rows.get(0).get("chilledVolumeM3").asDouble(), 1e-9);
     assertFalse(rows.get(0).get("degraded").asBoolean());
+
+    // The demand model schedules each outlet's orders, so every depot's outlets go with the request.
+    java.util.Set<String> sent = new java.util.HashSet<>();
+    for (JsonNode o : STUB.lastForecastRequest.get().path("outlets")) {
+      sent.add(o.path("depot").asText() + "|" + o.path("outlet_id").asText());
+    }
+    java.util.Set<String> expected = new java.util.HashSet<>();
+    for (String d : reference.depotCodes()) {
+      reference.outletsOfDepot(d, null).forEach(o -> expected.add(d + "|" + o.outletId()));
+    }
+    assertEquals(expected, sent);
   }
 
   @Test
@@ -1066,6 +1080,54 @@ class IntelligenceIntegrationTest {
   }
 
   @Test
+  void theOrderHistoryExportCountsEachOrderOnceByPlacementAndRefusesAnotherDepot() throws Exception {
+    // Issue #7: the demand model's training history, counted as dailyVolumes counts the actuals.
+    UUID first = demandOf("0.6000");
+    UUID second = demandOf("0.7000");
+    UUID cancelled = demandOf("0.8000");
+    UUID redelivery = demandOf("0.9000");
+    database.asSystem(ModuleRole.ORDERING, () -> {
+      database.update("UPDATE ordering.orders SET status = 'cancelled' WHERE order_id = ?", cancelled);
+      return database.update("UPDATE ordering.orders SET redelivery_of = ? WHERE order_id = ?", first, redelivery);
+    });
+    LocalDate today = LocalDate.now(com.waypoint.dispatch.shared.util.Clock.OPERATING_ZONE);
+    UUID adminId = account("mlx-" + run, "admin", true);
+    Cookie exporter = session("mlx-" + run);
+    String path = "/api/ml/training/orders?depot=" + depot + "&from=" + today.minusDays(1) + "&to=" + today.plusDays(1);
+
+    // Two at a time, so the keyset is followed across pages.
+    List<String> seen = new java.util.ArrayList<>();
+    Map<String, JsonNode> mine = new java.util.HashMap<>();
+    String cursor = null;
+    do {
+      JsonNode page = read(exporter, path + "&limit=2" + (cursor == null ? "" : "&after=" + cursor), 200);
+      for (JsonNode o : page.get("items")) {
+        seen.add(o.get("orderId").asText());
+        mine.put(o.get("orderId").asText(), o);
+      }
+      cursor = page.get("nextCursor").isNull() ? null : page.get("nextCursor").asText();
+    } while (cursor != null);
+
+    assertEquals(seen.size(), new java.util.HashSet<>(seen).size(), "each order once across pages");
+    assertTrue(mine.containsKey(first.toString()) && mine.containsKey(second.toString()), seen.toString());
+    assertFalse(mine.containsKey(cancelled.toString()), "a cancelled order is no demand");
+    assertTrue(mine.containsKey(redelivery.toString()), "a redelivery is volume the depot carries, as in dailyVolumes");
+    JsonNode o = mine.get(second.toString());
+    assertEquals(today.toString(), o.get("placedDate").asText(), "dated by placement in depot time");
+    assertEquals(outlet.outletId(), o.get("outletId").asText());
+    assertEquals(depot, o.get("depot").asText());
+    assertEquals("ambient", o.get("temperature").asText());
+    assertEquals(0.7, o.get("volumeM3").asDouble(), 1e-9);
+
+    String other = reference.depotCodes().stream().filter(d -> !d.equals(depot)).findFirst().orElseThrow();
+    long before = denials(adminId, IntelligenceDataQuery.EXPORT);
+    read(exporter, "/api/ml/training/orders?depot=" + other + "&from=" + today + "&to=" + today, 403);
+    assertEquals(before + 1, denials(adminId, IntelligenceDataQuery.EXPORT), "a depot outside scope is audited");
+    read(dispatcher, path, 403);
+    read(exporter, "/api/ml/training/orders?depot=" + depot + "&from=" + today + "&to=" + today.minusDays(1), 422);
+  }
+
+  @Test
   void aPlannedOrdersSupplyProbabilityRestsOnThePlan() throws Exception {
     UUID planId = publishedPlan();
     JsonNode stops = read(dispatcher, "/api/plans/" + planId, 200).at("/trips/0/stops");
@@ -1306,6 +1368,35 @@ class IntelligenceIntegrationTest {
     explain(dispatcher, "anything:" + planId, "{}", 422);
   }
 
+  @Test
+  void theAdministratorSeesWhereTheModelFailedAndADispatcherDoesNot() throws Exception {
+    // R-ML-27: an unfaithful answer shows on the AI health screen, with its prompt version.
+    UUID planId = publishedPlan();
+    StubLanguage.ANSWER.set("The plan carries 9 orders.");
+    explain(dispatcher, "plan:" + planId + ":health", "{\"headline\":\"2 orders\"}", 200);
+
+    JsonNode health = read(admin, "/api/ml/ai-health?days=1", 200);
+    long unfaithful = 0;
+    for (JsonNode day : health.get("calls")) {
+      if ("explain_plan".equals(day.get("purpose").asText())) unfaithful += day.get("unfaithful").asLong();
+    }
+    assertTrue(unfaithful >= 1, health.toString());
+    JsonNode failure = null;
+    for (JsonNode f : health.get("failures")) {
+      if ("explain_plan".equals(f.get("purpose").asText())) {
+        failure = f;
+        break;
+      }
+    }
+    assertTrue(failure != null, health.toString());
+    assertEquals("unfaithful", failure.get("outcome").asText());
+    assertEquals(com.waypoint.dispatch.intelligence.domain.PromptFacts.version(AiExplainer.INSTRUCTION),
+        failure.get("promptVersion").asText());
+    assertTrue(health.has("jev") && health.has("suggestions"));
+
+    read(dispatcher, "/api/ml/ai-health", 403);
+  }
+
   private JsonNode explain(Cookie who, String key, String facts, int expected) throws Exception {
     MvcResult r = http.perform(post("/api/ml/explain").cookie(who).contentType(MediaType.APPLICATION_JSON)
         .content("{\"key\":\"" + key + "\",\"facts\":" + facts + "}")).andReturn();
@@ -1319,6 +1410,26 @@ class IntelligenceIntegrationTest {
         "SELECT outcome FROM ml.ai_calls WHERE cache_key = ? ORDER BY asked_at DESC LIMIT 1", key));
   }
 
+  @Test
+  void aPersonsNameNeverReachesTheModelAndComesBackInTheAnswer() throws Exception {
+    // R-ML-31: our accounts' names become [person-N] before sending and are put back on our side.
+    String name = "Kasun Wije" + run;
+    accounts.createAccount("mln-" + run + "@intelligence.test", name, PASSWORD, "driver");
+    knownNames.forget();
+    UUID planId = publishedPlan();
+    StubLanguage.ANSWER.set("[person-1] carries 2 orders today.");
+    JsonNode answer = explain(dispatcher, "plan:" + planId + ":names",
+        "{\"headline\":\"" + name + " carries 2 orders, badge DRV-00133\"}", 200);
+    assertEquals("worded", answer.get("state").asText());
+    assertEquals(name + " carries 2 orders today.", answer.get("text").asText(), "the name is put back for the reader");
+    String sent = StubLanguage.SENT.get();
+    assertFalse(sent.contains("Kasun"), sent);
+    assertTrue(sent.contains("[person-1]") && sent.contains("[staff]"), sent);
+    String kept = (String) database.asSystem(ModuleRole.ML, () -> database.queryOne(
+        "SELECT sent_facts::text AS s FROM ml.ai_calls WHERE cache_key = ?", "plan:" + planId + ":names")).get("s");
+    assertFalse(kept.contains("Kasun"), "the record keeps what was sent, masked");
+  }
+
   // ---- Jev in shadow (roadmap AI-J1, R-ML-11) ----------------------------------------
 
   @Test
@@ -1326,13 +1437,14 @@ class IntelligenceIntegrationTest {
     UUID order = demandOf("0.6000");
     JsonNode raised = mapper.readTree(send(dispatcher, envelope("issue:Raise", null,
         "{\"type\":\"ROAD_DISRUPTION\",\"severity\":\"MEDIUM\",\"depotCode\":\"" + depot + "\",\"outletId\":\""
-            + outlet.outletId() + "\",\"subjects\":[{\"type\":\"order\",\"id\":\"" + order + "\"}],\"description\":\"Road flooded near the bridge, call me on 0771234567\"}"),
+            + outlet.outletId() + "\",\"subjects\":[{\"type\":\"order\",\"id\":\"" + order + "\"}],\"description\":\"Road flooded near the bridge, ask mld-" + run + ", call me on 0771234567\"}"),
         200));
     UUID issueId = UUID.fromString(raised.at("/result/issueId").asText());
     com.waypoint.dispatch.issues.contract.IssueEvents.IssueRaised event = new com.waypoint.dispatch.issues.contract.IssueEvents.IssueRaised(
         issueId, com.waypoint.dispatch.issues.contract.IssueViews.IssueType.ROAD_DISRUPTION,
         com.waypoint.dispatch.issues.contract.IssueViews.IssueSeverity.MEDIUM, depot, Optional.of(outlet.outletId()), List.of());
     UUID eventId = UUID.randomUUID();
+    knownNames.forget();
     deliver("ml.on-issue-raised-jev", eventId, event);
     deliver("ml.on-issue-raised-jev", eventId, event);
 
@@ -1344,7 +1456,50 @@ class IntelligenceIntegrationTest {
     assertEquals("road_disruption", row.get("jev_choice"));
     assertEquals(Boolean.TRUE, row.get("agrees"));
     assertTrue(((String) row.get("masked_text")).contains("[phone]"), "the phone number never left: " + row);
+    assertFalse(((String) row.get("masked_text")).contains("mld-" + run), "nor the dispatcher's name (R-ML-31): " + row);
+    assertTrue(((String) row.get("masked_text")).contains("[person-1]"), row.toString());
     assertFalse(StubLanguage.JEV_STATE.get().contains("0771234567"));
+  }
+
+  @Test
+  void jevGuessesTheSituationOfAChatReportFromItsWordsAndIsScoredAgainstTheTypePicked() throws Exception {
+    UUID picked = UUID.randomUUID();
+    UUID other = UUID.randomUUID();
+    UUID spoken = UUID.randomUUID();
+    UUID dispatcherOwn = UUID.randomUUID();
+    knownNames.forget();
+    deliver("ml.on-report-posted-jev", UUID.randomUUID(), report(picked, "driver", "store_closed",
+        "Shutter is down at the store, ask mld-" + run + ", call 0771234567", Optional.empty()));
+    deliver("ml.on-report-posted-jev", UUID.randomUUID(), report(other, "driver", "other",
+        "Something odd happened at the gate", Optional.empty()));
+    deliver("ml.on-report-posted-jev", UUID.randomUUID(), report(spoken, "driver", "store_closed",
+        "Voice note", Optional.of(UUID.randomUUID())));
+    deliver("ml.on-report-posted-jev", UUID.randomUUID(), report(dispatcherOwn, "dispatcher", "store_closed",
+        "Store says they are closed today", Optional.empty()));
+
+    StubLanguage.JEV_ANSWER.set("ROAD_BLOCKED");
+    jevJob.runAt(Instant.now());
+    List<Map<String, Object>> rows = database.asSystem(ModuleRole.ML, () -> database.query(
+        "SELECT issue_id, source, actual_type, status, agrees, masked_text, prompt_version FROM ml.jev_shadow"
+            + " WHERE issue_id IN (?, ?, ?, ?)", picked, other, spoken, dispatcherOwn));
+    assertEquals(1, rows.size(), "only the typed, written report of a worker is asked about: " + rows);
+    Map<String, Object> row = rows.get(0);
+    assertEquals("report", row.get("source"));
+    assertEquals("STORE_CLOSED", row.get("actual_type"));
+    assertEquals("answered", row.get("status"));
+    assertEquals(Boolean.FALSE, row.get("agrees"), "a wrong guess is scored as one");
+    assertEquals(JevShadow.REPORT_PROMPT_VERSION, row.get("prompt_version"));
+    assertFalse(((String) row.get("masked_text")).contains("mld-" + run), row.toString());
+    assertTrue(((String) row.get("masked_text")).contains("[phone]"), row.toString());
+    assertTrue(StubLanguage.JEV_STATE.get() == null || !StubLanguage.JEV_STATE.get().contains("0771234567"));
+  }
+
+  private com.waypoint.dispatch.messaging.contract.MessagingEvents.MessagePosted report(
+      UUID messageId, String role, String type, String words, Optional<UUID> voice) {
+    return new com.waypoint.dispatch.messaging.contract.MessagingEvents.MessagePosted(
+        UUID.randomUUID(), messageId, "trip", UUID.randomUUID().toString(), depot, Optional.of("VEH001"),
+        Optional.of(serviceDate), "Kasun", role, "report", Optional.of(type), "dispatch", List.of(), words,
+        Instant.now(), voice, Optional.empty(), List.of());
   }
 
   // ---- the attention watch (issue #268) ---------------------------------------------
@@ -1446,6 +1601,30 @@ class IntelligenceIntegrationTest {
     send(stranger, envelope("ml:AcknowledgeAttention", 1L,
         "{\"depotCode\":\"" + depot + "\",\"deliveryId\":\"" + delivery
             + "\",\"kind\":\"WINDOW_AT_RISK\",\"reason\":\"Not mine to decide\"}"), 403);
+  }
+
+  @Test
+  void theWatchersAiLayerOrdersWhatTheRulesRaisedInShadowAndAnInventedItemIsRefused() throws Exception {
+    // docs/issues/watch-review/PLAN.md: two open items, one review; recorded, shown to nobody.
+    LocalDate day = LocalDate.of(2031, 3, 8);
+    Instant at = Instant.parse("2031-03-08T04:00:00Z");
+    raiseAttention(UUID.randomUUID(), UUID.randomUUID(), day, at);
+    raiseAttention(UUID.randomUUID(), UUID.randomUUID(), day, at);
+
+    StubLanguage.ANSWER.set("{\"order\": [\"A2\", \"A1\"], \"why\": \"A2 closes in 48 minutes\"}");
+    assertTrue(watchReview.runAt(at, day) >= 1);
+    assertEquals("used", watchCall(at));
+
+    StubLanguage.ANSWER.set("{\"order\": [\"A9\", \"A1\"], \"why\": \"A9 first\"}");
+    Instant later = at.plusSeconds(600);
+    watchReview.runAt(later, day);
+    assertEquals("unfaithful", watchCall(later), "an item never sent is not used");
+  }
+
+  private String watchCall(Instant at) {
+    return (String) database.asSystem(ModuleRole.ML, () -> database.queryOne(
+        "SELECT outcome FROM ml.ai_calls WHERE purpose = 'watch_review' AND cache_key = ?",
+        "watch:" + depot + ":" + at.getEpochSecond() / 300)).get("outcome");
   }
 
   private boolean raiseAttention(UUID delivery, UUID trip, LocalDate day, Instant at) {

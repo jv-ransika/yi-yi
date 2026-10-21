@@ -8,7 +8,8 @@ import { cx } from "@shared/ui";
 import { clockOn, hhmm, stops } from "@shared/wording";
 import { lateBy, tripOf, updateText, useOpenTripThread } from "../data/threads.ts";
 import { depotSummaries, etaOf, groupByTrip, NEEDS_SHOWN, progress, routeLabel, summaryText, type NeedCard, type Run } from "../data/liveDesk.ts";
-import { suggestionFor, type Suggestion } from "../data/playbooks.ts";
+import { playbookOf, suggestionFor, type Suggestion } from "../data/playbooks.ts";
+import { usePlaybooks } from "../data/usePlaybooks.ts";
 import DecisionAsk from "./DecisionAsk.tsx";
 import { Action, Bar, Chip, NOT_AVAILABLE_NOTE, STATUS } from "./LiveParts.tsx";
 
@@ -59,13 +60,17 @@ export default function LiveNeeds({
     setNote(null);
     void openThread(tripOf(run), { address: { to: "outlet", outletId: next.outletId }, body: updateText(next, lateBy(next, date)) }).then(setNote);
   };
-  // The playbook for a card, its message filled from the stop it is about (issue #269).
-  const suggest = (card: NeedCard): { suggestion: Suggestion; tripId: string | null; outletId: string | null } => {
+  // The playbook for a card, its message filled from the stop it is about (issue #269). Read from the
+  // server once; while it cannot be read, a card offers no steps rather than old ones.
+  const playbooks = usePlaybooks();
+  const suggest = (card: NeedCard): { suggestion: Suggestion; tripId: string | null; outletId: string | null } | null => {
+    const playbook = playbookOf(playbooks.data, card.kind);
+    if (!playbook) return null;
     const run = runs.find((r) => r.day.vehicleId === card.vehicleId);
     const stops = run?.day.stops ?? [];
     const stop =
       (card.kind === "failed" ? stops.find((s) => s.outcome === "FAILED") : card.kind === "left" ? stops.find((s) => `left-${s.deliveryId}` === card.id) : run?.day.current) ?? null;
-    const suggestion = suggestionFor(card.kind, {
+    const suggestion = suggestionFor(playbook, {
       vehicle: card.vehicleId,
       store: stop?.outletId ?? null,
       expected: stop ? etaOf(stop, date) : null,
@@ -134,7 +139,15 @@ export default function LiveNeeds({
           onChanged={decisions.refresh}
         />
       )}
-      <Suggested {...suggest(card)} online={online} showMessage={card.kind !== "window"} onWrite={write} />
+      {(() => {
+        const suggested = suggest(card);
+        return suggested ? (
+          <Suggested {...suggested} online={online} showMessage={card.kind !== "window"} onWrite={write} />
+        ) : playbooks.error ? (
+          // Rule 9: say the advice is missing rather than show none silently.
+          <p className="mt-1 text-[12px] text-go-secondary">Suggested steps could not be read.</p>
+        ) : null;
+      })()}
     </>
   );
   return (
@@ -247,7 +260,18 @@ function Suggested({
   );
 }
 
-/** Every vehicle on the road as a bar of its stops closed, in its status colour. */
+/**
+ * Every vehicle on the road as a bar of its stops closed. One neutral colour for
+ * progress; colour only where the dispatcher should look (late red, at risk
+ * amber), and offline as a light bar, its position unknown. The status is in
+ * words beside it, so colour is never the only signal.
+ */
+const ATTENTION: Partial<Record<Run["status"], { bar: string; text: string }>> = {
+  late: { bar: "bg-go-danger", text: "text-go-danger-strong" },
+  "at-risk": { bar: "bg-[#c08a3e]", text: "text-go-warning-text" },
+  offline: { bar: "bg-go-ink/15", text: "text-go-secondary" },
+};
+
 export function TripBoard({ runs, onOpenTrip }: { runs: Run[]; onOpenTrip: (vehicleId: string) => void }): React.JSX.Element {
   const summaries = depotSummaries(runs);
   return (
@@ -259,6 +283,7 @@ export function TripBoard({ runs, onOpenTrip }: { runs: Run[]; onOpenTrip: (vehi
       <ul className="flex flex-col">
         {runs.map((run) => {
           const status = STATUS[run.status];
+          const attention = ATTENTION[run.status];
           return (
             <li key={run.day.vehicleId}>
               <button
@@ -271,8 +296,11 @@ export function TripBoard({ runs, onOpenTrip }: { runs: Run[]; onOpenTrip: (vehi
                   <span className="text-[13px] font-semibold text-go-ink">{run.day.vehicleId}</span>
                   <span className="truncate text-[11.5px] text-go-secondary">{routeLabel(run) || stops(run.day.stops.length)}</span>
                 </span>
-                <Bar share={progress(run)} className={status.bar} thick />
-                <span className={cx("text-right text-[12.5px] font-medium", status.text)}>{status.label}</span>
+                <Bar share={progress(run)} className={attention?.bar ?? "bg-go-ink/45"} thick />
+                <span className="flex flex-col text-right">
+                  <span className={cx("text-[12.5px] font-medium", attention?.text ?? "text-go-ink")}>{status.label}</span>
+                  <span className="text-[11px] text-go-secondary">{`${run.day.done} of ${stops(run.day.stops.length)}`}</span>
+                </span>
               </button>
             </li>
           );

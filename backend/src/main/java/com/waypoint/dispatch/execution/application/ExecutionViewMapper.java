@@ -6,6 +6,7 @@ import com.waypoint.dispatch.execution.contract.ExecutionViews.DeliveryLineView;
 import com.waypoint.dispatch.execution.contract.ExecutionViews.DeliveryRecordView;
 import com.waypoint.dispatch.execution.contract.ExecutionViews.RunSheetStopView;
 import com.waypoint.dispatch.execution.contract.ExecutionViews.RunSheetView;
+import com.waypoint.dispatch.execution.contract.ExecutionViews.StopSkipView;
 import com.waypoint.dispatch.execution.domain.DeliveryRecord;
 import com.waypoint.dispatch.execution.infrastructure.JdbcDeliveryRepository;
 import java.sql.Timestamp;
@@ -31,7 +32,12 @@ final class ExecutionViewMapper {
         r.proofId().isPresent(), r.rowVersion(), lines(row), Optional.ofNullable((String) row.get("store_answer_waived")),
         Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_minutes")),
         Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_low")),
-        Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_high")));
+        Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_high")),
+        Optional.ofNullable((String) row.get("skip_then")).map(then -> new StopSkipView(
+            then.toUpperCase(java.util.Locale.ROOT), (String) row.get("skip_reason"),
+            Boolean.TRUE.equals(row.get("skip_whole_trip")), instant(row.get("skipped_at")).orElseThrow(),
+            Optional.empty(), Optional.empty())),
+        Optional.ofNullable((String) row.get("reported_problem")).map(p -> p.toUpperCase(java.util.Locale.ROOT)));
   }
 
   /** One sheet per vehicle, in the order the rows came: trips as they left, stops as planned. */
@@ -63,7 +69,8 @@ final class ExecutionViewMapper {
         instant(row.get("expected_arrival")), ((Timestamp) row.get("released_at")).toInstant(),
         r.startedAt(), Optional.empty(), Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_minutes")),
         Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_low")),
-        Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_high")));
+        Optional.ofNullable((java.math.BigDecimal) row.get("expected_service_high")),
+        Optional.ofNullable((String) row.get("reported_problem")).map(p -> p.toUpperCase(java.util.Locale.ROOT)));
   }
 
   /** The products of a record, read as one JSON array with the record so a run sheet stays one query. */

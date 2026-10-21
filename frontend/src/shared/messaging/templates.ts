@@ -1,5 +1,5 @@
 import type { DecisionView } from "../domain/issues.ts";
-import type { RunSheetStopView } from "../domain/execution.ts";
+import type { DeliveryRecordView, RunSheetStopView } from "../domain/execution.ts";
 import type { MessageAudience } from "../domain/messaging.ts";
 import { clock } from "../wording/time.ts";
 
@@ -109,4 +109,55 @@ export function replies(state: TripState): Reply[] {
   }
   out.push({ id: "driver.noted", version: TEMPLATE_VERSION, label: "Noted, carry on", to: "driver", outletId: null, body: "Noted. Carry on with the next stop." });
   return out.slice(0, 4);
+}
+
+/**
+ * Ready replies for the store manager (decision suggestions, part 4): what a
+ * store usually answers in its delivery's situation, to the dispatcher or to its
+ * own driver (R-MSG-16). Chosen by code from the store's delivery; the store may
+ * edit before sending, and nothing is sent by itself. Never a time or a promise
+ * the store did not choose: the words stay the store's.
+ */
+export function storeReplies(delivery: DeliveryRecordView | null, tr: (english: string) => string = (s) => s): Reply[] {
+  if (!delivery) return [];
+  const open = delivery.outcome === "PENDING" || delivery.outcome === "ARRIVED";
+  const out: Reply[] = [];
+  const reply = (id: string, label: string, to: MessageAudience, body: string) =>
+    out.push({ id: `storereply.${id}`, version: TEMPLATE_VERSION, label: tr(label), to, outletId: null, body: tr(body) });
+  if (open && delivery.reportedProblem === "STORE_CLOSED") {
+    reply("open_now", "We are open now", "dispatch", "We are open now and can receive. Please send the driver back.");
+    reply("next_day", "Deliver on the next day", "dispatch", "We cannot receive today. Please deliver on the next delivery day.");
+  } else if (open && delivery.reportedProblem === "CANNOT_UNLOAD") {
+    reply("space_clear", "Space is clear now", "dispatch", "The unloading area is clear now. The driver can unload.");
+    reply("next_day", "Deliver on the next day", "dispatch", "We cannot receive today. Please deliver on the next delivery day.");
+  } else if (delivery.outcome === "ARRIVED") {
+    reply("coming", "Coming to the door", "driver", "Coming to the door now.");
+  } else if (delivery.outcome === "PENDING" && delivery.startedAt) {
+    reply("ready", "We are ready", "driver", "We are ready to receive.");
+  } else if (delivery.outcome === "SKIPPED") {
+    reply("understood", "Understood", "dispatch", "Understood, thank you.");
+  } else if (delivery.outcome === "FAILED") {
+    reply("next_run", "Send it on the next run", "dispatch", "Please send our order on the next run.");
+  }
+  return out;
+}
+
+/**
+ * The dispatcher's word to every store still waiting on the trip (decision
+ * suggestions, part 4): one message per store, each with its own expected time,
+ * never one line for all. The stops not reached yet, in trip order; a store
+ * whose time is not known gets none.
+ */
+export function eachStoreMessages(state: Pick<TripState, "stops" | "serviceDate">): Array<{ outletId: string; body: string }> {
+  return [...state.stops]
+    .filter((s) => s.outcome === "PENDING")
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((s) => {
+      const late = delayOf(s, state.serviceDate);
+      const at = clock(s.expectedArrival ?? `${state.serviceDate}T${s.plannedArrival.slice(0, 5)}:00+05:30`);
+      return {
+        outletId: s.outletId,
+        body: late >= DELAY_WORTH_SAYING ? `Running ${late} min late. Now expected at ${at}.` : `On the way. Expected at ${at}.`,
+      };
+    });
 }

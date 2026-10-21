@@ -5,6 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.waypoint.dispatch.execution.contract.ExecutionEvents.EtaChanged;
+import com.waypoint.dispatch.issues.contract.IssueEvents.IssueRaised;
+import com.waypoint.dispatch.issues.contract.IssueEvents.IssueResolved;
+import com.waypoint.dispatch.issues.contract.IssueViews.IssueSeverity;
+import com.waypoint.dispatch.issues.contract.IssueViews.IssueType;
+import com.waypoint.dispatch.issues.contract.IssueViews.SubjectRef;
 import com.waypoint.dispatch.loading.contract.LoadingEvents.ReleasedStop;
 import com.waypoint.dispatch.loading.contract.LoadingEvents.TripReleased;
 import com.waypoint.dispatch.notification.NotificationSupport;
@@ -290,6 +295,55 @@ class NotificationConsumersIntegrationTest extends NotificationSupport {
 
     assertTrue(recipientsOf(eventId).containsAll(Set.of(driver.id(), loader.id())), "as it always did");
     assertFalse(recipientsOf(eventId).contains(manager.id()), "no outlet is named, so none is told separately");
+  }
+
+  @Test
+  void aResolvedIssueTellsItsStoreWhatWasDoneAndNotTheDispatcherWhoResolvedIt() {
+    UUID eventId =
+        deliver(
+            "notification.on-issue-resolved",
+            new IssueResolved(
+                UUID.randomUUID(), outlet.depotCode(), Optional.of(outlet.outletId()), "WRITE_OFF", Instant.now()),
+            dispatcher.id());
+
+    Map<String, Object> mine = notificationFor(eventId, manager);
+    assertEquals("Issue resolved", mine.get("title"));
+    assertEquals("Written off", mine.get("body"), "an issue that cannot be read still says what was done");
+    assertFalse(recipientsOf(eventId).contains(stranger.id()), "another outlet's manager");
+    assertFalse(recipientsOf(eventId).contains(dispatcher.id()), "the dispatcher resolved it (R-NOT-07)");
+  }
+
+  @Test
+  void aQuietGoodsProblemDoesNotAlertTheDispatcherAndALoadersFlagDoesNotReachTheStore() throws Exception {
+    // R-ISS-16: damaged goods wait for the day's end; the store that raised them still sees them.
+    UUID damaged = raised(IssueType.DAMAGED_GOODS);
+    UUID told = deliver("notification.on-issue-raised", raisedEvent(damaged, IssueType.DAMAGED_GOODS));
+    assertFalse(recipientsOf(told).contains(dispatcher.id()), "no alert to the dispatcher for a quiet type");
+    assertTrue(recipientsOf(told).contains(manager.id()), "the store still hears of its own problem");
+
+    // The loader's shortfall flag: quiet, and never the store's.
+    UUID shortfall = raised(IssueType.LOADING_SHORTFALL);
+    UUID flagged = deliver("notification.on-issue-raised", raisedEvent(shortfall, IssueType.LOADING_SHORTFALL));
+    assertFalse(recipientsOf(flagged).contains(dispatcher.id()));
+    assertFalse(recipientsOf(flagged).contains(manager.id()));
+
+    // A loud one still alerts the dispatcher.
+    UUID fault = raised(IssueType.VEHICLE_FAULT);
+    assertTrue(recipientsOf(deliver("notification.on-issue-raised", raisedEvent(fault, IssueType.VEHICLE_FAULT)))
+        .contains(dispatcher.id()));
+  }
+
+  private UUID raised(IssueType type) throws Exception {
+    String body = envelope("issue:Raise", null,
+        "{\"type\":\"" + type.name() + "\",\"severity\":\"MEDIUM\",\"depotCode\":\"" + outlet.depotCode() + "\","
+            + "\"outletId\":\"" + outlet.outletId() + "\","
+            + "\"subjects\":[{\"type\":\"order\",\"id\":\"" + UUID.randomUUID() + "\"}],\"description\":\"reported in a test\"}");
+    return UUID.fromString(send(dispatcher, body, 200).get("result").get("issueId").asText());
+  }
+
+  private IssueRaised raisedEvent(UUID issueId, IssueType type) {
+    return new IssueRaised(issueId, type, IssueSeverity.MEDIUM, outlet.depotCode(), Optional.of(outlet.outletId()),
+        List.of(new SubjectRef("order", UUID.randomUUID().toString())));
   }
 
   @Test

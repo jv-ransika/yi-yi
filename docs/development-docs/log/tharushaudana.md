@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-10-21 - feat(ml): retrain the demand forecast on our own orders
+
+`feat/demand-retrain-tool` · @tharushaudana · [#7](https://github.com/jv-ransika/yi-yi/issues/7)
+
+Second of #7's two pull requests ([walkthrough](../../issues/007-demand-retraining/WALKTHROUGH.md)). `training.retrain_demand` refits the `DemandModel` on the order export and backtests it from rolling Mondays. A `waypoint-demand` model, allowed in production, is handed over only when both total and chilled WAPE beat a naive 8-week mean and are no worse than the model in use (R-ML-30, ML-46). `training.run` builds one each week beside the late-risk model; the registry loads whichever demand model the manifest names. The plan's backtest starts are corrected: 10 finished weeks are needed after each.
+Verified: `ml-server` pytest (36, 8 for the demand retrain on a synthetic 78-week history).
+Open: the dry run on the Datathon order history (licensed data, not on this machine); no depot has a year of our own orders yet.
+
+---
+
+## 2026-10-21 - feat(ml): export every order as demand for retraining the forecast
+
+`feat/demand-retraining` · @tharushaudana · [#7](https://github.com/jv-ransika/yi-yi/issues/7)
+
+First of two pull requests for retraining the demand model on our own orders ([plan](../../issues/007-demand-retraining/PLAN.md)). `OrderQuery.orderHistory` gives a depot's orders one by one, keyset-paged on placement, and `GET /api/ml/training/orders` exports them behind `ml:ExportTrainingData`; a depot outside scope is 403 and audited. It counts exactly what `dailyVolumes` counts for the forecast's actuals, so redeliveries stay (the plan first left them out; R-ML-29, ML-45). `training.fetch --kind orders` pages it.
+Verified: `IntelligenceIntegrationTest` (46, the export's test among them) and the full backend suite (759) on a fresh local PostgreSQL 17 database; `ml-server` pytest.
+Open: the retrain tool is the second pull request.
+
+---
+
+## 2026-10-21 - feat(ml): scan every model file before it is loaded
+
+`feat/model-file-scan` · @tharushaudana · [#5](https://github.com/jv-ransika/yi-yi/issues/5)
+
+Loading a pickle runs what it names, and these files come from outside the codebase. `app/pickle_scan.py` reads each model file's opcodes without loading it and refuses any file naming a (module, name) pair outside `model-globals.txt`, or that it cannot read to the end. It runs in CI before the model tests, in the image build that every deploy runs, and in the service before `joblib.load` (R-ML-28, ML-44). An allowlist, not picklescan or modelscan: both are blocklists, and both stop at the first numpy array of a joblib file (byte 5,378 of the Task 1 model's 23 MB), with picklescan reporting a planted `os.system` file clean. Also moves the CI model job to Python 3.12, missed in the model swap.
+Verified: `ml-server` pytest (44), the scan on the served models and on a planted payload.
+
+---
+
+## 2026-10-21 - feat(ml): serve the final Datathon models
+
+`feat/final-datathon-models` · @tharushaudana · [#5](https://github.com/jv-ransika/yi-yi/issues/5)
+
+The model service now serves the team's final submission: `datathon-task1-parallel@2026.10.1` (Monte-Carlo simulator and LightGBM in one file, with its no-road copy) and `datathon-task2a@2026.10.1` (bottom-up order regression), in place of the two-pipeline blend. The service rebuilds the model's reference context from the tables the backend sends, keeping the trained vocabulary. The forecast now needs each depot's outlets, so `ForecastJob` sends them (EDGE-CASES ML-38). The image is Python 3.12, without XGBoost and CatBoost. Detail in the [walkthrough](../../issues/005-final-models/WALKTHROUGH.md).
+Verified: `ml-server` pytest (28), the Task 2A submission reproduced exactly, `ModuleBoundaryTest`, `IntelligenceDomainTest`.
+Open: `IntelligenceIntegrationTest` was skipped here (no database); the leakage figures are the earlier pipeline's until rerun; register and activate 2026.10.1 on preview.
+
+---
+
 ## 2026-10-05 - fix(orders): one Current set, and all of it goes into the plan
 
 `fix/current-one-list-plan-next-run` · @tharushaudana

@@ -51,6 +51,8 @@ public class IntelligenceController {
   private final KpiQuery kpis;
   private final RequestAuthorizer authorizer;
   private final com.waypoint.dispatch.intelligence.application.AiExplainer explainer;
+  private final com.waypoint.dispatch.intelligence.application.PlaybookQuery playbooks;
+  private final com.waypoint.dispatch.intelligence.application.AiHealthQuery aiHealth;
 
   public IntelligenceController(
       IntelligenceDataQuery intelligence,
@@ -61,8 +63,12 @@ public class IntelligenceController {
       com.waypoint.dispatch.intelligence.application.ReplyRankingQuery replyRanking,
       com.waypoint.dispatch.intelligence.application.RiskReviewQuery riskReviews,
       RequestAuthorizer authorizer,
-      com.waypoint.dispatch.intelligence.application.AiExplainer explainer) {
+      com.waypoint.dispatch.intelligence.application.AiExplainer explainer,
+      com.waypoint.dispatch.intelligence.application.PlaybookQuery playbooks,
+      com.waypoint.dispatch.intelligence.application.AiHealthQuery aiHealth) {
+    this.aiHealth = aiHealth;
     this.explainer = explainer;
+    this.playbooks = playbooks;
     this.intelligence = intelligence;
     this.outlook = outlook;
     this.attention = attention;
@@ -116,6 +122,17 @@ public class IntelligenceController {
   @GetMapping("/capacity/decisions")
   public List<CapacityDecisionView> capacityDecisions(@RequestParam String depot, HttpServletRequest request) {
     return capacityDecisions.fromThisWeek(read(request, "wpt:ml:forecast:" + depot), depot);
+  }
+
+  /**
+   * R-ML-27: where the language models and Jev fail, for the administrator. Its
+   * own action: it shows every depot's masked inputs, which ml:Read does not reach.
+   */
+  @GetMapping("/ai-health")
+  public com.waypoint.dispatch.intelligence.contract.AiHealthViews.AiHealthView aiHealth(
+      @RequestParam(defaultValue = "14") int days, HttpServletRequest request) {
+    authorizer.require(request, com.waypoint.dispatch.intelligence.contract.AiHealthViews.READ, "wpt:ml:ai:*");
+    return aiHealth.over(days);
   }
 
   @GetMapping("/models")
@@ -206,6 +223,19 @@ public class IntelligenceController {
     return intelligence.trainingDeliveries(actor, depot, from, to, Optional.ofNullable(after), limit);
   }
 
+  /** Issue #7: every order of a depot as demand, for retraining the demand forecast. */
+  @GetMapping("/training/orders")
+  public Page<com.waypoint.dispatch.intelligence.contract.PredictionViews.TrainingOrderView> trainingOrders(
+      @RequestParam String depot,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(required = false) String after,
+      @RequestParam(required = false) Integer limit,
+      HttpServletRequest request) {
+    Actor actor = authorizer.require(request, IntelligenceDataQuery.EXPORT, "wpt:ml:training:" + depot);
+    return intelligence.trainingOrders(actor, depot, from, to, Optional.ofNullable(after), limit);
+  }
+
   /** Roadmap MF-05: scored routes as the model read them, with their outcomes, for retraining. */
   @GetMapping("/training/routes")
   public Page<com.waypoint.dispatch.intelligence.contract.PredictionViews.TrainingRouteView> trainingRoutes(
@@ -232,6 +262,26 @@ public class IntelligenceController {
   public com.waypoint.dispatch.intelligence.application.ReplyRankingQuery.ReplyRankingView replyRanking(
       HttpServletRequest request) {
     return replyRanking.ranking(read(request, "wpt:ml:replies:*"));
+  }
+
+  /** Issue #269: every situation's steps and ready message, for Live's "Needs you" and the trip's chat. */
+  @GetMapping("/playbooks")
+  public java.util.List<com.waypoint.dispatch.intelligence.contract.PlaybookViews.PlaybookView> playbooks(
+      HttpServletRequest request) {
+    read(request, "wpt:ml:playbooks:*");
+    return playbooks.catalogue();
+  }
+
+  /**
+   * The decisions to suggest for one stop in a situation (a situation's name or
+   * a report type), checked against the rules, most likely first. Advice only.
+   */
+  @GetMapping("/decision-suggestions")
+  public com.waypoint.dispatch.intelligence.contract.PlaybookViews.SuggestionsView decisionSuggestions(
+      @org.springframework.web.bind.annotation.RequestParam java.util.UUID deliveryId,
+      @org.springframework.web.bind.annotation.RequestParam String situation,
+      HttpServletRequest request) {
+    return playbooks.forStop(read(request, "wpt:ml:delivery:" + deliveryId), deliveryId, situation);
   }
 
   private Actor read(HttpServletRequest request, String resource) {

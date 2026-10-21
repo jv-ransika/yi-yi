@@ -4,6 +4,229 @@
 
 ---
 
+## 2026-10-21 - fix: the AI parts measured against the real models, and two faults fixed
+
+`dev` · @Oxshadha
+
+- `AiLiveEvaluation` (by hand, `AI_EVAL=1`, never in CI) runs Jev and the watcher's AI layer through the production prompt code on a labelled set. Jev: 58 of 60, no personal data sent, no injection followed. The watcher was never able to work on a depot with more than about three items (facts cut at 300 characters, ML-52), and Groq's retired `llama-3.1-8b-instant` made every language-model call fail: the default is now `qwen/qwen3.8-27b`, chosen on the results. Jev's off-options answers are refused (ML-51). Numbers in the [watch-review](../../issues/watch-review/PLAN.md) and [decision-suggestions](../../issues/decision-suggestions/PLAN.md) plans. Any deployment pinning `AI_MODEL=llama-3.1-8b-instant` must change it.
+
+---
+
+## 2026-10-21 - docs: the rest of live refresh waits for a second backend
+
+`dev` · @Oxshadha
+
+- Versions on signals, catch-up after a gap and several instances are deferred: with one instance and `304` reads they save little against what they add. The plan names when to come back to them ([plan](../../issues/live-refresh/PLAN.md)).
+
+---
+
+## 2026-10-21 - feat: Jev is scored on typed trip-chat reports, in shadow
+
+`dev` · @Oxshadha
+
+- Before Jev may turn a voice note or an "other" report into a situation, it has to be measured. A worker's written report whose type was picked is the labelled set: Jev reads the masked excerpt alone and its guess is kept beside the type's situation in `ml.jev_shadow` (`source = report`), with its own prompt version on the AI health screen (R-ML-33, ML-50, [plan](../../issues/decision-suggestions/PLAN.md) PR 5). Off unless `JEV_ENABLED`; @jv-ransika agreed to run it in shadow in production, which is `JEV_ENABLED=true` and `OPENROUTER_API_KEY` in the server's `.env`.
+
+---
+
+## 2026-10-21 - feat: a decision taken without a chip is logged too
+
+`dev` · @Oxshadha
+
+- The suggestion log knew only decisions taken by tapping a chip, so a skip from Live or a button left the chances blind. The chat now records the chips it showed once; a skip or End trip taken any other way within three hours is logged against them by Intelligence, with what was taken and that no chip took it ([plan](../../issues/decision-suggestions/PLAN.md)). Decided cases count both ways.
+
+---
+
+## 2026-10-21 - feat: the watcher's AI layer, in shadow
+
+`dev` · @Oxshadha
+
+- The hybrid watcher agreed on 2026-10-21 ([plan](../../issues/watch-review/PLAN.md)). The rules still detect; every 5 minutes a model orders only what they raised for a depot and says why in one line, from codes under short references, masked. Used only as an exact reordering with a faithful line; recorded in `ml.ai_calls` as `watch_review` and shown to nobody, so the AI health screen shows how it does and a metric counts agreement with the rules' first item (R-ML-32, ML-49). Off unless `AI_WATCH_REVIEW=true`.
+
+---
+
+## 2026-10-21 - feat: the store gets ready replies for its delivery's situation
+
+`dev` · @Oxshadha
+
+- Decision suggestions part 4, first half ([plan](../../issues/decision-suggestions/PLAN.md)). The store's trip messages offer ready replies chosen by code from its delivery: found closed, "We are open now" or "Deliver on the next day"; cannot unload, "Space is clear now"; at the door or on the way, a word to its driver; skipped or failed, an answer to the dispatcher. In the store's language, logged like the dispatcher's (R-MSG-13). The store's delivery read now says when the driver reported a problem (`DeliveryRecordView.reportedProblem`).
+- The dispatcher's word to several stores followed: "Tell each store waiting its time" in the trip's chat sends one message per store, each with its own expected time, after a preview; a failure leaves the rest to send again.
+- Also: the trip board colours only the trips that need attention (late red, at risk amber, offline light), with "1 of 2 stops" in words.
+
+---
+
+## 2026-10-21 - feat: the driver's phone watches its vehicle
+
+`dev` · @Oxshadha
+
+- Live refresh phase 3, first half ([plan](../../issues/live-refresh/PLAN.md)). The driver's scope is a vehicle on a day, which the depot stream refused, so the phone polled its run sheet every 2 s. Changes now name the vehicles their payload names, and `changes.vehicle=` with `changes.date=` opens a watch only for the driver of that vehicle that day (`app.actor_drives`; anyone else is 403 and audited). The phone reads the run sheet on a signal and polls every 60 s while the watch is up, about 30 times fewer requests per phone; without it, every 2 s as before.
+- Still open in phase 3: a version on each signal, so a screen already holding it skips the read.
+
+---
+
+## 2026-10-21 - feat: one live connection per browser tab
+
+`dev` · @Oxshadha
+
+- Live refresh phase 2 ([plan](../../issues/live-refresh/PLAN.md)). A dispatcher tab held up to three event streams (changes, unread count, positions), so a second tab could exhaust the browser's six connections per host and stop updating. Now one `/api/live/stream` carries the parts a tab needs as named events. Each module offers its part through `platform/web/LiveStreamPart`, so the platform imports no module, and the existing endpoints open the same parts: one copy of each check. A part the reader may not hear refuses the whole connection.
+- In the browser, `shared/live/tabStream.ts` gives each hook something that behaves like its old EventSource; a tab whose connection never opens (an older server, a test that does not serve it) falls back to the separate endpoints, so a rolling deploy cannot leave a screen deaf.
+
+---
+
+## 2026-10-21 - feat: spoken messages are revalidated and their copies kept only while used
+
+`dev` · @Oxshadha
+
+- Every Listen downloaded the clip again (`no-store`). The speech read is now revalidated like other F-07 reads: the reader is checked on every play and a clip the phone holds comes back as a 304 with no body. Spoken copies unused for 30 days lose their audio (rows stay) and are spoken again when next needed; gauges count copies held against messages spoken, the reuse that says whether keeping them pays (R-MSG-10, MSG-11b).
+- Not built: sending audio as it is read. It sits in PostgreSQL and is read whole by the driver either way, so streaming pays only once audio moves to the object store.
+
+---
+
+## 2026-10-21 - feat: a lock means "must go out", not "same truck"
+
+`dev` · @Oxshadha
+
+- @jv-ransika's decision of 2026-10-21, built before the truck-breakdown work. A locked order is no longer pinned to its vehicle and trip: a regenerate that keeps decisions places it right after the hand placements, on any vehicle that passes every rule, and refuses the whole run, naming the order and its failing rules, when none does (`mustPlace` beside `pins`). A locked order on a broken truck goes out on another and stays locked. Hand placements keep today's behaviour. A lock now falls away only when unlocked or out of the plan, not when moved to another trip (R-PLN-35, R-PLN-36 rewritten; PLN-50 to PLN-52; glossary "lock").
+- The later stages still stand aside whenever decisions are kept, so a locked order is never dropped or deferred; letting the cost stage move a locked order between trucks is allowed by the owner but not built.
+- @jv-ransika answered no: a regenerate from scratch decides everything again, locks included; a lock binds only a regenerate that keeps decisions. That is today's behaviour (`PlanningSnapshotsIntegrationTest.aRegenerateFromScratchLetsTheEngineDecideAgain`), so only R-PLN-36's wording changed.
+
+---
+
+## 2026-10-21 - feat: a closed store goes to the dispatcher, and the driver goes on
+
+`dev` · @Oxshadha
+
+- Piece 4 of the trip-problems vision, part 1, on @jv-ransika's decisions of 2026-10-21 ([plan](../../issues/trip-problems-driver/PLAN.md)). The driver's "Store closed" and "Cannot unload here" are reports (`delivery:ReportStopProblem`, `delivery.problem_reported`), no longer failures: the dispatcher gets a report in the trip's chat with its suggested decisions, a push and a "Decide" card on Live; the store is told the dispatcher decides (routing version 17). The driver cannot fail such a stop, goes on to the next one, and sees it as "With the dispatcher". A report queued offline that lands after the dispatcher's skip is kept quietly (R-EXE-32, R-NOT-21, EXE-52 to EXE-54).
+- The driver's list loses "Running late" and gains "Road blocked". A driver UI flow change approved by the owner under role-ui-scope.md; look and wording style kept.
+- The delay notice followed: a breakdown or a blocked road posts "VEH037 is delayed: breakdown" to the trip's room, and the stores still waiting get a push; stores already served read it without one, and the driver's own words stay the dispatcher's (R-MSG-17, R-NOT-22, routing version 18, EXE-55).
+- Goods damaged followed: the driver's choice opens the delivery form for the usable units (reason and note filled in) and records a partial delivery plus a quiet DAMAGED_GOODS issue; nothing usable is still not delivered (R-EXE-33, EXE-56). Part 2 of the owner's reply, the lock as "must go out", is next.
+
+---
+
+## 2026-10-21 - fix: a second look at today's work
+
+`dev` · @Oxshadha
+
+- Name masking ran over the whole JSON of the facts, so an account whose first name matched a field ("Next", "Reason") would have renamed that field. Only values are masked now (ML-47a).
+- The loader's Found: an error was drawn behind the open sheet, so a refusal (trip released, no signal) was never seen; it is now said in the sheet. Tapping Found before the report had become an issue ticked the item and left the issue to arrive with nobody to resolve it; it now says to try again in a minute (ISS-25a).
+- Checked and sound: routing version 16 replaced no earlier condition on the issue rules; AI health authorizes before reading and refuses a dispatcher.
+
+---
+
+## 2026-10-21 - feat: a voice note's transcript outlives its audio
+
+`dev` · @Oxshadha
+
+- The nightly job deleted a note's words together with its audio after 400 days, leaving nothing searchable of what was said. The words now stay, labelled "Machine transcript · audio no longer kept", with the engine and model that wrote them and the note's SHA-256 tying them to the recording (R-MSG-15, MSG-11a). This changes data retention, so it is a setting, `TRANSCRIPT_KEEP_AFTER_AUDIO` (default on), and P-33 now says legal is to confirm it.
+
+---
+
+## 2026-10-21 - feat: people's names are masked before anything reaches a language model
+
+`dev` · @Oxshadha
+
+- Patterns caught phones, IDs and links but no names, and no pattern can tell a Sinhala or Tamil name. Our own accounts' names now become `[person-N]` before an explanation is sent or a report is kept for Jev, and staff badges become `[staff]`; the answer gets the names back on our side (R-ML-31, ML-47, ML-48). Names come from a new Identity contract read, `PersonQuery.activeNames`, kept 10 minutes.
+
+---
+
+## 2026-10-21 - feat: AI health for the administrator, with a prompt version on every call
+
+`dev` · @Oxshadha
+
+- Every language model call (`ml.ai_calls`) and Jev shadow answer (`ml.jev_shadow`) now records its prompt version, a hash of the instruction text, so a prompt change can be compared and rolled back. A new admin tab, AI health, shows per use how calls ended and how slow they were, the newest failures with their masked input, Jev's agreement per prompt version, and how often suggested decisions are taken (R-ML-27, ML-42, ML-43). Its own action `ml:ReadAiHealth`, since `ml:Read` is a dispatcher's and the screen reaches every depot.
+- Why: a gateway with guardrails is only half of it; the other half is seeing where it fails. Next in this line: masking known names, transcription on our own servers, a hybrid watcher that sends only raised items to a model.
+
+---
+
+## 2026-10-21 - feat: a loader takes back a flag when the goods turn up
+
+`dev` · @Oxshadha
+
+- Piece 3 of the trip-problems vision. On a reported item the loader's report sheet offers "Found, remove flag" with where it was: the order's newest open shortfall issue is resolved "found at the depot" through the existing `issue:RecordReplacement` (a new loader policy version grants it, depot-scoped), and the item is ticked loaded. No new command or event (R-ISS-17, ISS-25 to ISS-27). A flow change to the loader UI under role-ui-scope.md, approved with the vision.
+- A replacement, anyone's, is now refused once the trip is released. Loading resolves only the shortfall the issue names, so finding one item of an order leaves another item's flag open (it used to clear every shortfall of the order).
+
+---
+
+## 2026-10-21 - feat: goods problems wait for the day's end
+
+`dev` · @Oxshadha
+
+- Piece 2 of the trip-problems vision. Missing, wrong or damaged goods (parameter `quiet.types`: loading shortfall, damaged goods, stock discrepancy) no longer alert the dispatcher or escalate: an orange stop on the Live timeline for the day, and an Issues tab "Goods problems" (R-ISS-16, ISS-22 to ISS-24). The store that raised one still hears of it; a loader's shortfall flag no longer reaches the store (routing version 16, facts `loud` and `forStore`). `IssueView` says `quiet`; a refused parameter stops escalation and reads err loud.
+- Fixed an order dependency in the suggestion tests: the 20-decision test now uses its own situation, so the rule-prior test stays on rules in any order.
+
+---
+
+## 2026-10-21 - feat: suggested decisions learn from what dispatchers chose (#269)
+
+`dev` · @Oxshadha
+
+- Once a situation has 20 decided cases in 90 days, a suggestion's chance is how often it was taken when shown there, smoothed toward its rule prior, and the chip says "chosen 21 of 30 times"; until then "Suggested by the rules" (R-ML-26). Counted by situation only for now, since the log does not keep the window or the stop's state.
+- Open: this machine ran out of disk (about 200 MB free), which slowed Postgres in Docker until a full backend run timed out in seven tests; each passed again alone at normal speed.
+
+---
+
+## 2026-10-21 - feat: one playbook catalogue on the server, and suggested decisions in the trip's chat (#269)
+
+`dev` · @Oxshadha
+
+- Merged the decision-suggestions plan with issue #269 rather than build a second catalogue (rule 5). @Dinusha-Ekanayake's five playbooks moved unchanged from `dispatcher/data/playbooks.ts` to the server (`intelligence/domain/Playbooks`), beside the chat's report situations; "Needs you" reads them from `GET /api/ml/playbooks` and says so when it cannot. @Dinusha-Ekanayake: the editor for administrators is still yours on #269; the catalogue it would edit is now the server's.
+- Beside a report in the chat, at most three decisions as chips, most likely first, checked by the server against the rules (R-ML-26): no skip, wait or question on a stop done, none of a mall's after its window, a warning before a second skip, cold chain for chilled goods. Skip and End trip open already set; Tell the store puts the playbook's message in the composer. What was shown and taken goes to `ml.decision_suggestions` (`ml:RecordSuggestion`). Rule priors until a situation has 20 cases. Plan: [docs/issues/decision-suggestions/PLAN.md](../../issues/decision-suggestions/PLAN.md); edge cases ML-39 to ML-41.
+
+---
+
+## 2026-10-21 - feat: a skipped stop reaches the driver at once, and the dispatcher sees whether it did
+
+`dev` · @Oxshadha
+
+- The driver's phone watches no change stream, so it heard a skip only on its next run-sheet poll and could drive to a skipped store. A new `delivery.skipped` push now reads the run sheet again at once and shows "Run sheet changed", as a revised plan does (a flow fix under role-ui-scope.md).
+- The run sheet carries each dispatcher skip (`StopSkipView`: then, reason, whole trip, when), and the dispatcher's depot read adds whether the driver's phone has read the push (`NotificationQuery.driverReadsOfSkips`, as R-MSG-14 does for messages). The Live trip page says "Off the trip · next day · not seen by the driver yet" in amber until it is read, so the dispatcher phones a driver with no signal (EXE-51).
+- @jv-ransika approved [docs/issues/decision-suggestions/PLAN.md](../../issues/decision-suggestions/PLAN.md) (relayed by @Oxshadha, 2026-10-21): rule priors first, counts in words once a situation has 20 cases, Jev in shadow for voice and free text.
+- Open: GitHub Actions has started no job since 2026-10-09 ("recent account payments have failed or your spending limit needs to be increased" on @jv-ransika's account), so no push has been checked by CI; checks run locally until billing is fixed.
+
+---
+
+## 2026-10-21 - feat: the dispatcher skips a store or ends a trip on the road (R-EXE-31)
+
+`dev` · @Oxshadha
+
+- `delivery:SkipStop` (next day or cancel, with a reason, under the stop's version) and `delivery:EndTrip` (every stop not yet done, next day). A stop is skipped from pending or arrived (`DeliveryRecord.skipByDispatcher`); the decision is kept once in `execution.stop_skips`. Authority is data: the dispatcher policy allows both, the driver policy (which allows `delivery:*`) denies both, and a new row policy lets a dispatcher of the depot write a stop only as skipped. `delivery.skipped` moves the same order: next operating day (`IN_TRANSIT -> DEFERRED`) or cancelled and returned (`IN_TRANSIT -> CANCELLED`, `order.cancelled` with `returnedToDepot`, no warehouse call). A redelivered skip is ignored by its service date (ORD-25). The store reads why in the trip's messages and by push, the driver by push only (routing version 15, R-NOT-20). Plan: [docs/issues/trip-skip/PLAN.md](../../issues/trip-skip/PLAN.md); edge cases EXE-47 to EXE-49, ORD-25, STK-15.
+- Dispatcher: Skip store on each open stop and End trip on the Live trip page, and the same in the trip's chat: Skip beside a report about a stop still open (reports now carry the stop they are about, `aboutOutletId`) and End trip in its header, opened in place since a dialog cannot sit over the chat drawer. A skipped stop reads "Off the trip". Stores and the driver see only the outcome.
+- Driver: the Available switch asks before it reports the vehicle in the workshop or available (EXE-50); an accidental tap told the dispatcher a vehicle was out. A flow fix under role-ui-scope.md, in the sign-out sheet's look; the new strings need native review in si and ta.
+- Plan for suggested decisions in the chat, with the strict review folded in: [docs/issues/decision-suggestions/PLAN.md](../../issues/decision-suggestions/PLAN.md). Open: its three questions for @jv-ransika.
+
+---
+
+## 2026-10-21 - feat: live refresh phase 1, every screen on the change stream
+
+`dev` · @Oxshadha
+
+- The loader's dock board and load sheet polled every 2 s and never listened to the change stream; trip messages polled every 10 s and the store's issues every 60 s. All four now re-read on the depot's (or the store's outlets') signal (F-07b). The safety-net poll is 60 s while the stream is up and at least 10 s while it is down (was 15 s and 2 s), so an idle loader tablet goes from about 60 reads a minute to about 1.
+- A dispatcher's command that went through tells every screen on the page showing its topic to read at once (`announceChange`), so their own change never waits for the signal or a poll.
+- `useResource` read nothing when a read was switched on under the same key (the Issues screen's Resolved tab) until the next poll; it now reads at once. The 2 s poll had hidden it.
+- Plan for the next phases: [docs/issues/live-refresh/PLAN.md](../../issues/live-refresh/PLAN.md). Open: the folder takes an issue number once the issue exists.
+
+---
+
+## 2026-10-20 - fix: one temperature badge in every role
+
+`dev` · @Oxshadha
+
+- Each role drew "chilled" its own way (a blue text pill and a dot on the dispatcher's screens, an outlined text chip in the store). `TemperatureBadge` and `RefrigeratedBadge` in `src/shared/ui/Temperature.tsx` use the loader's Figma icons: the thermometer for chilled goods, the box for ambient, the snowflake for a refrigerated vehicle. The dispatcher's orders, order drawer and plan board and the store's Home, Track and Deliveries use them; the loader's badge already had these icons and is unchanged. `Icon` takes an optional size for small pills. The loader's "Take trip" stays on one line in the trip table (asked for by @Oxshadha, a one-cell change), and the dispatcher's order states are short enough for their column ("In draft", "Delivered · awaiting store").
+
+---
+
+## 2026-10-20 - fix: field flow bugs from a demo walk-through
+
+`dev` · @Oxshadha
+
+- Resolving a report in a trip's messages left its issue open, because R-MSG-07 only went from issue to report. A report made from an issue now carries `issueId` (`MessageView`), and the dispatcher's Mark resolved sends `issue:Resolve` with the issue's version, then resolves the report at once. The store was never told an issue was resolved: MODULES.md listed Notification as a consumer of `issue.resolved`, but none existed. `OnIssueResolved` and routing version 14 tell the outlet's store managers (R-NOT-19).
+- The driver's "21 to review": the demo drive stamped positions with the demo clock, which the server refuses as more than five minutes ahead (DEMO-12), and each refused batch was held for review. Points now carry real time, and a refused position batch leaves the phone (`outcome.ts`, `sw-drain.mjs`), including ones already held.
+- The dispatcher's sidebar foot ran off the screen under the demo bar (`lg:h-dvh` under the bar); the dispatcher, admin and store shells now subtract `--demo-banner-h`. The publish step counted only outlets whose order waits, so it said "0 store managers" when every order was on a trip; it now counts every outlet on a trip too (R-NOT-15).
+- The loader's "Arrived only" was an independent switch styled like the one-of-five filters, so two chips looked picked; it is now one of them. A loader's message notification now opens the trip's messages at that message, to hear and answer it.
+- Wording: reconstructed product ids read "Fresh dry goods 263 (inferred)" in notes, issues and the thread; issue detail names the order by its reference and drops internal ids; the admin profile drops the account id and row version; the orders table keeps the state, at risk and issues as separate pills. The error pages lay out in two columns on a wide screen, say "this device", and use the sign-in's sun and moon toggle (`ThemeToggle`). Decide's "How the engine decides what waits" is folded to one line until opened.
+- Open: the loader tablet shifted sideways on one Android tablet but fits at every width from 768 to 1280 px in a browser, so it is not reproduced; the store timeline now completes "Arriving" on the stop's arrival, and any other timeline fault needs a reproduction. Order references stay `WPO-` and 12 characters (they are sent to the warehouse); a shorter format is a decision for the team.
+
+---
+
 ## 2026-10-10 - feat: demo sign-in for judges; Decide never shows an order id
 
 `dev` · @Oxshadha

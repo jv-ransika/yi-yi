@@ -103,7 +103,7 @@ allocation distances or capacity rules. See [the plan](../issues/161-live-map/PL
 
 | Layer | Contents |
 | --- | --- |
-| contract | `OrderViews`, `OrderStatus`, `OrderQuery` (incl. `confirmedDemand`, and `bookedVolumes` and `openOrders`, depot totals and unplanned orders by delivery day for the date outlook), `OrderCommands`, `OrderEvents` |
+| contract | `OrderViews`, `OrderStatus`, `OrderQuery` (incl. `confirmedDemand`, and `bookedVolumes` and `openOrders`, depot totals and unplanned orders by delivery day for the date outlook, and `orderHistory`, every order as demand by placement for retraining the forecast, #7), `OrderCommands`, `OrderEvents` |
 | domain | `Order`, `OrderLine`, `OrderStatus` state machine, `Cutoff`, `TemperatureRequirement`, `OrderVersion` |
 | application | `PlaceOrderHandler`, `AmendOrderHandler`, `CancelOrderHandler`, `CloseOrdersHandler`, `OrderDataQuery` |
 | infrastructure | `JdbcOrderRepository`, `OrderProjection`. The warehouse adapter lives in the Warehouse module, behind `StockPort` |
@@ -130,7 +130,7 @@ Revised 2026-09-30. `OrderStatus` in `ordering/contract` is the one vocabulary; 
 **Commands:** `order:Place`, `order:Amend`, `order:Cancel`, `order:CloseForDay`.
 **Queries:** `confirmedDemand(depot, day)`, `order(id)`, `timeline(orderId)`, `ordersForOutlet(outletId, cursor)`.
 **Publishes:** `order.placed`, `order.amended`, `order.cancelled`, `order.auto_deferred`, `orders.closed`.
-**Consumes:** `plan.published`, `plan.revised`, `order.deferred`, `order.unservable`, `loading.started`, `trip.released`, `delivery.completed`, `delivery.failed`, `receipt.confirmed`, `receipt.auto_closed`, `redelivery.requested`, `warehouse.order_status_changed`. `loading.started` is what makes an order `loading`, after which amendment is refused (ORD-06).
+**Consumes:** `plan.published`, `plan.revised`, `order.deferred`, `order.unservable`, `loading.started`, `trip.released`, `delivery.completed`, `delivery.failed`, `delivery.skipped` (the same order to the next operating day, or cancelled and returned to the depot, R-EXE-31), `receipt.confirmed`, `receipt.auto_closed`, `redelivery.requested`, `warehouse.order_status_changed`. `loading.started` is what makes an order `loading`, after which amendment is refused (ORD-06).
 **Job:** `ordering.cutoff` at 16:00 Asia/Colombo.
 
 **Ports:** `StockPort` (Warehouse contract), called synchronously at placement.
@@ -248,7 +248,7 @@ If no compatible substitute exists, the trip is deferred as a unit and the order
 
 **Commands:** `StartStop`, `RecordArrival`, `RecordDelivery`, `RecordFailedDelivery`, `CaptureProof`, `ReportVehicleStatus`, `ReportRoadFault`, `RecordPositions` (`delivery:RecordPositions`, no event: R-EXE-18 to R-EXE-21).
 **Queries:** `runSheet(vehicle, day)`, `deliveryRecord(allocationId)`, `proof(deliveryRecordId)`. Live map reads (`PositionsQuery`, web only): `GET /api/execution/positions?date=&depot=|outlet=` (last good fix per vehicle, with `offline`) and `GET /api/execution/trips/{tripId}/trail` (keyset on `recordedAt`).
-**Publishes:** `delivery.started`, `delivery.arrived`, `delivery.completed`, `delivery.failed`, `vehicle.at_depot`, `vehicle.fault_reported`, `road.disruption_reported`.
+**Publishes:** `delivery.started`, `delivery.arrived`, `delivery.completed`, `delivery.failed`, `delivery.skipped` (the dispatcher took a stop off a trip on the road: `delivery:SkipStop`, `delivery:EndTrip`, R-EXE-31), `delivery.problem_reported` (the driver found the store closed or cannot unload; the stop stays open for the dispatcher: `delivery:ReportStopProblem`, R-EXE-32), `vehicle.at_depot`, `vehicle.fault_reported`, `road.disruption_reported`.
 **Consumes:** `trip.released`.
 
 **Ports:** `ProofStore`.
@@ -419,7 +419,7 @@ A driver is pushed only trip-level events (R-NOT-08), and whoever caused an even
 | domain | `DeterministicEstimator`, `ModelGate`, `SupplyPolicy`, `PlannedRoutes`, `CircuitBreaker` |
 | application | `PlanScoringJob`, `ForecastJob`, `ModelHandlers`, `IntelligenceConsumers`, `IntelligenceDataQuery`, `ReferencePayload` |
 | infrastructure | `ModelServingAdapter` (HTTP to the model service, behind a circuit breaker), `JdbcIntelligenceRepository` |
-| web | `/api/ml/models`, `/plans/{id}/predictions`, `/forecast`, `/forecast/overview` (a depot's weeks with calendar and fleet capacity), `/orders/{id}/supply-probability`, `/training/deliveries` |
+| web | `/api/ml/models`, `/plans/{id}/predictions`, `/forecast`, `/forecast/overview` (a depot's weeks with calendar and fleet capacity), `/orders/{id}/supply-probability`, `/training/deliveries`, `/training/routes`, `/training/orders` |
 
 **The model service** (`ml-server/`, ADR-001's Python trigger) serves the trained Datathon models: `delivery_risk` (service minutes and P(late) per stop, scored over whole planned routes, with a no-road-conditions fallback) and `demand_forecast` (weekly total and chilled m³). It only predicts, and refuses to start if a model file differs from its manifest.
 
@@ -436,7 +436,7 @@ A driver is pushed only trip-level events (R-NOT-08), and whoever caused an even
 - Consumes `plan.published` and `plan.revised`.
 - Publishes `order.outlook_changed` when a day an order is booked for worsens to busy or at risk (`OutlookWatchJob`, R-ML-08).
 - Publishes `stop.likely_late` when a published stop will likely arrive after its window (`LateNoticeJob`, R-ML-22).
-- Reads Planning (`PlanQuery.plan`), Ordering (`order`, `dailyVolumes`, `bookedVolumes`, `openOrders`), Execution (`actuals`) and Reference (outlets, vehicles, travel, calendar, traffic speed, road conditions) through their contracts.
+- Reads Planning (`PlanQuery.plan`), Ordering (`order`, `dailyVolumes`, `bookedVolumes`, `openOrders`, `orderHistory`), Execution (`actuals`) and Reference (outlets, vehicles, travel, calendar, traffic speed, road conditions) through their contracts.
 - Planning reads `PredictionQuery.planScoring` for `plannedWithoutPredictor`, lazily, so it still works without this module.
 
 ---
@@ -534,7 +534,7 @@ Revised 2026-09-30 against the verified API (RULES-AND-POLICIES §2) and decisio
 | `StockPort.placeOrder(orderRef, lines)` | Ordering, synchronously | Order placed | 2 s | Circuit opens, the order saves as `stock_unknown` and the dispatcher sees the degraded banner. **Never assume reserved** |
 | `StockPort.amendOrder(ref, lines)` | Ordering, synchronously | Order amended | 2 s | As above |
 | Retry of a `stock_unknown` placement | Warehouse module | Warehouse reachable again | 2 s | Queries by `orderRef` first, because `POST /orders` is not idempotent (R-STK-11) |
-| Cancel (`PUT status cancelled`) | Warehouse module, on `order.cancelled` | Order cancelled | 5 s | Retried through the outbox until acknowledged. Deferral does **not** cancel (D-H) |
+| Cancel (`PUT status cancelled`) | Warehouse module, on `order.cancelled` | Order cancelled | 5 s | Retried through the outbox until acknowledged. Deferral does **not** cancel (D-H). An order cancelled off a skipped trip (`returnedToDepot`, R-EXE-31) was shipped and came back: nothing is sent, depot staff put the stock right, and it is counted (`waypoint.warehouse.returned_to_depot`) |
 | Ship and deliver (`PUT status`) | Warehouse module, on `trip.released` and `delivery.completed` | Trip leaves, stop completes | 5 s | Retried through the outbox; an invalid transition is recorded and alerted |
 | Catalogue sync (`GET /products`) | Warehouse module, scheduled | Bulk sync | 60 s | Keep the last good copy, mark it stale with its age |
 
@@ -613,9 +613,11 @@ Modules connect three ways: a contract query (synchronous, read only), an event 
 | `loading.interchange_requested` | Loading | Planning |
 | `trip.released` | Loading | Execution, Ordering, Warehouse (shipped), Notification, Planning (freeze, R-PLN-44) |
 | `delivery.started`, `delivery.completed`, `delivery.failed`, `eta.changed` | Execution | Ordering, Receipt, Warehouse (delivered), Issues, Notification |
+| `delivery.skipped` | Execution | Ordering, Intelligence (a decision taken without a chip) |
+| `delivery.problem_reported` | Execution | Messaging, Notification |
 | `delivery.arrived` | Execution | Notification (store: unload and check, R-EXE-25) |
 | `vehicle.at_depot` | Execution | Loading (dock board, R-LOD-12), Notification (loaders, R-EXE-24) |
-| `vehicle.fault_reported`, `road.disruption_reported` | Execution | Issues, Notification |
+| `vehicle.fault_reported`, `road.disruption_reported` | Execution | Issues, Notification (and the stores still waiting, R-NOT-22), Messaging (the notice in the trip's room, R-MSG-17) |
 | `receipt.confirmed`, `receipt.disputed`, `receipt.auto_closed` | Receipt | Ordering, Issues, Notification |
 | `receipt.handover_confirmed` | Receipt | Notification |
 | `issue.raised`, `issue.resolved`, `issue.escalated` | Issues | Notification, Messaging (`issue.raised`, `issue.resolved`) |
@@ -626,7 +628,7 @@ Modules connect three ways: a contract query (synchronous, read only), an event 
 | `warehouse.discrepancy_found` | Warehouse | Issues |
 | `catalogue.synced` | Warehouse | Ordering |
 | `reference.version_published`, `vehicle.status_changed`, `calendar.overridden` | Reference | Planning, Notification |
-| `message.posted` | Messaging | Notification |
+| `message.posted` | Messaging | Notification; Intelligence (a worker's typed report, for Jev in shadow, R-ML-33) |
 | `demo.driver_notifications_requested` | Demo | Notification |
 | `order.outlook_changed` | Intelligence | Notification |
 | `stop.likely_late` | Intelligence | Notification |

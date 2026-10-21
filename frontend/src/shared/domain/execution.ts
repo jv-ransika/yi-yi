@@ -49,6 +49,23 @@ export type RunSheetStopView = {
   /** Roadmap MF-06: about four stops in five take between these minutes; null with too little history. */
   expectedServiceLow?: number | string | null;
   expectedServiceHigh?: number | string | null;
+  /** R-EXE-31: the dispatcher took the stop off the trip. Absent from an older server or a plan revision's skip. */
+  skip?: StopSkipView | null;
+  /** R-EXE-32: the driver reported a closed store or a stop that cannot unload; the dispatcher decides. */
+  reportedProblem?: StopProblem | null;
+};
+
+/** R-EXE-32: what the driver reports at a stop for the dispatcher to decide. */
+export type StopProblem = "STORE_CLOSED" | "CANNOT_UNLOAD";
+
+/** Mirror of ExecutionViews.StopSkipView. `seenByDriver` is the dispatcher's only: null when unknown. */
+export type StopSkipView = {
+  then: "NEXT_DAY" | "CANCEL";
+  reason: string;
+  wholeTrip: boolean;
+  at: IsoInstant;
+  seenByDriver: boolean | null;
+  seenByDriverAt: IsoInstant | null;
 };
 
 export type RunSheetView = {
@@ -105,6 +122,8 @@ export type DeliveryRecordView = {
   /** Roadmap MF-06: about four stops in five take between these minutes; null with too little history. */
   expectedServiceLow?: number | string | null;
   expectedServiceHigh?: number | string | null;
+  /** R-EXE-32: the driver reported the store closed or that they cannot unload; the dispatcher decides. Absent from an older server. */
+  reportedProblem?: StopProblem | null;
 };
 
 /** A name and the badge shown on screen, never an email or a phone number. */
@@ -150,6 +169,8 @@ export const ExecutionCommandKind = {
   captureProof: "delivery:CaptureProof",
   reportVehicleStatus: "delivery:ReportVehicleStatus",
   reportFault: "delivery:ReportFault",
+  /** R-EXE-32: a closed store or a stop that cannot unload, for the dispatcher to decide. */
+  reportStopProblem: "delivery:ReportStopProblem",
   recordPositions: "delivery:RecordPositions",
   /** R-EXE-24: the driver is at the depot with the vehicle, ready for it to be loaded. */
   arriveAtDepot: "delivery:ArriveAtDepot",
@@ -157,7 +178,17 @@ export const ExecutionCommandKind = {
   leaveWithoutStoreAnswer: "delivery:LeaveWithoutStoreAnswer",
   /** FF-06b: an administrator withdraws a vehicle's Fuel Pass QR, with a reason. The upload is a PUT, not a command. */
   revokeFuelPass: "vehicle:RevokeFuelPass",
+  /** R-EXE-31: the dispatcher takes one stop off a trip on the road, next day or cancel, with a reason. */
+  skipStop: "delivery:SkipStop",
+  /** R-EXE-31: the dispatcher ends a trip on the road; every stop not yet done goes to the next day. */
+  endTrip: "delivery:EndTrip",
 } as const;
+
+/** delivery:SkipStop, sent with the stop's rowVersion. */
+export type SkipStopPayload = { deliveryId: Uuid; then: "NEXT_DAY" | "CANCEL"; reason: string };
+
+/** delivery:EndTrip. */
+export type EndTripPayload = { tripId: Uuid; reason: string };
 
 /** serviceDate: today unless tomorrow's trip is loaded tonight (R-LOD-13). */
 export type ArriveAtDepot = { vehicleId: string; serviceDate?: string };

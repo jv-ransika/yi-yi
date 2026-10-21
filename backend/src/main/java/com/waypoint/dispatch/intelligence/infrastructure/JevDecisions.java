@@ -34,8 +34,16 @@ public class JevDecisions implements DecisionPort {
   private final Clock clock;
   private final CircuitBreaker circuit;
   private final HttpClient http;
+  private final URI url;
 
+  @org.springframework.beans.factory.annotation.Autowired
   public JevDecisions(AiProperties properties, ObjectMapper json, Metrics metrics, Clock clock) {
+    this(properties, json, metrics, clock, URI.create(URL));
+  }
+
+  /** A test's own address in place of OpenRouter's. */
+  JevDecisions(AiProperties properties, ObjectMapper json, Metrics metrics, Clock clock, URI url) {
+    this.url = url;
     this.properties = properties;
     this.json = json;
     this.metrics = metrics;
@@ -58,7 +66,7 @@ public class JevDecisions implements DecisionPort {
       question.put("criteria", options);
       String body = json.writeValueAsString(Map.of(
           "model", properties.jevModel(), "state", state, "questions", Map.of(QUESTION, question)));
-      HttpRequest request = HttpRequest.newBuilder(URI.create(URL))
+      HttpRequest request = HttpRequest.newBuilder(url)
           .timeout(properties.timeout())
           .header("authorization", "Bearer " + properties.openrouterKey())
           .header("content-type", "application/json")
@@ -74,6 +82,11 @@ public class JevDecisions implements DecisionPort {
       JsonNode answer = root.path("answers").path(QUESTION);
       if (!answer.path("choice").isTextual()) {
         circuit.onFailure(clock.now());
+        return Optional.empty();
+      }
+      // Only an option we offered is an answer: anything else is the vendor's error, never a new type.
+      if (!options.containsKey(answer.path("choice").asText())) {
+        status = "off_options";
         return Optional.empty();
       }
       Map<String, Double> probabilities = new LinkedHashMap<>();

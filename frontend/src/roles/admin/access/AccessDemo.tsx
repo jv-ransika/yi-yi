@@ -16,6 +16,7 @@ import { ActionsScreen } from "./RoleActionScreens";
 import { AuditConsole } from "./audit/AuditConsole";
 import { SystemConstraintsScreen } from "./SystemConstraintsScreen";
 import { ModelsScreen } from "./ModelsScreen";
+import { AiHealthScreen } from "./AiHealthScreen";
 import AssistantsConsole from "../assistants/AssistantsConsole";
 import DemoControlRoom from "../demo/DemoControlRoom";
 import { fetchRoles, fetchActions } from "../data/access";
@@ -24,7 +25,7 @@ import type { RoleView, ActionView } from "@shared/domain/identity";
 import { ProfilePhotoDialog } from "./ProfilePhotoDialog";
 import "./access-demo.css";
 
-type Tab = "people" | "personas" | "actions" | "catalogue" | "history" | "audit" | "assistants" | "forecasts" | "models" | "vehicles" | "depots" | "outlets" | "orders" | "trips" | "trips_planned" | "trips_live" | "constraints" | "demo";
+type Tab = "people" | "personas" | "actions" | "catalogue" | "history" | "audit" | "assistants" | "forecasts" | "models" | "ai" | "vehicles" | "depots" | "outlets" | "orders" | "trips" | "trips_planned" | "trips_live" | "constraints" | "demo";
 type Route = { tab: Tab; member: string | null; persona: Persona | null };
 type Draft = { target: "member" | "persona"; id: string; action: string; choice: Decision; reason: string; place: string; expires: string; stage: "edit" | "review" };
 type Details = { capability: Capability; member?: Member; persona?: Persona };
@@ -42,7 +43,7 @@ const DEFAULT_ADMIN: Member = {
 function routeFromHash(): Route {
   if (typeof window === "undefined") return { tab: "people", member: null, persona: null };
   const [rawTab, id] = window.location.hash.replace(/^#\/?/, "").split("/");
-  const tab: Tab = rawTab === "roles" ? "personas" : (rawTab === "personas" || rawTab === "actions" || rawTab === "catalogue" || rawTab === "history" || rawTab === "audit" || rawTab === "assistants" || rawTab === "forecasts" || rawTab === "models" || rawTab === "vehicles" || rawTab === "depots" || rawTab === "outlets" || rawTab === "orders" || rawTab === "trips" || rawTab === "trips_planned" || rawTab === "trips_live" || rawTab === "constraints" || rawTab === "demo" ? rawTab : "people");
+  const tab: Tab = rawTab === "roles" ? "personas" : (rawTab === "personas" || rawTab === "actions" || rawTab === "catalogue" || rawTab === "history" || rawTab === "audit" || rawTab === "assistants" || rawTab === "forecasts" || rawTab === "models" || rawTab === "ai" || rawTab === "vehicles" || rawTab === "depots" || rawTab === "outlets" || rawTab === "orders" || rawTab === "trips" || rawTab === "trips_planned" || rawTab === "trips_live" || rawTab === "constraints" || rawTab === "demo" ? rawTab : "people");
   return { tab, member: tab === "people" && id || null, persona: tab === "personas" && PERSONAS.some((item) => item.id === id && item.id !== "super_admin") ? id as Persona : null };
 }
 
@@ -55,6 +56,7 @@ const NAV: Array<{ tab: Tab; label: string; icon: IconName; also?: Tab[] }> = [
   { tab: "vehicles", label: "Vehicles", icon: "truck" },
   { tab: "forecasts", label: "Forecasts", icon: "chart-line" },
   { tab: "models", label: "Models", icon: "model" },
+  { tab: "ai", label: "AI health", icon: "alert" },
   { tab: "audit", label: "Audit console", icon: "grid" },
   { tab: "constraints", label: "System constraints", icon: "permission-list" },
   { tab: "demo", label: "Demo control room", icon: "live" },
@@ -84,6 +86,7 @@ const TITLES: Record<Tab, [string, string]> = {
   demo: ["Demo control room", "Run the live demo: demo clock, demo day, accounts and the path through every role."],
   forecasts: ["Forecasts", "See order demand and fleet needs."],
   models: ["Models", "Choose which trained model answers each prediction."],
+  ai: ["AI health", "Where language models and Jev fail, and which prompt version was used."],
   vehicles: ["Vehicles", "Review fleet by depot and day status."],
   depots: ["Operating depots", "Operational hub assignments connecting people, vehicle fleet capacity, and served retail outlets."],
   outlets: ["Retail outlets", "Receiving store destinations, unloading dock capabilities, and delivery time windows."],
@@ -457,7 +460,7 @@ export default function AccessDemo({ userId, displayName = "Administrator" }: { 
     </>;
   };
 
-  return <main aria-label="Admin workspace" className="access-demo flex min-h-dvh w-full flex-col bg-go-canvas font-go text-go-ink lg:h-dvh lg:flex-row">
+  return <main aria-label="Admin workspace" className="access-demo flex min-h-[calc(100dvh-var(--demo-banner-h,0px))] w-full flex-col bg-go-canvas font-go text-go-ink lg:h-[calc(100dvh-var(--demo-banner-h,0px))] lg:flex-row">
     <aside className={cx("hidden h-full shrink-0 flex-col bg-white pt-7 pb-6 lg:flex", rail ? "w-[84px] items-center gap-[5px] px-3 overflow-y-auto" : "w-[260px] gap-1 overflow-y-auto px-5")}>
       <div className={cx("flex items-center gap-2.5", rail ? "justify-center pb-[13px]" : "px-2 pb-5")}>
         <span className="text-[34px] leading-none font-extrabold text-go-ink">GO</span>
@@ -537,6 +540,7 @@ export default function AccessDemo({ userId, displayName = "Administrator" }: { 
       )}
       {route.tab === "forecasts" && <ForecastsScreen />}
       {route.tab === "models" && <ModelsScreen />}
+      {route.tab === "ai" && <AiHealthScreen />}
       {route.tab === "vehicles" && <VehiclesScreen state={state} />}
     </div></div>
   {details && <Modal title={details.capability.label} onClose={() => setDetails(null)}><div className="space-y-4 text-sm"><p>{details.capability.description}</p><div className="flex flex-wrap gap-2"><Badge tone={details.capability.implemented ? "green" : "amber"}>{details.capability.implemented ? "Catalogue entry" : "Unavailable"}</Badge><Badge>{details.capability.module}</Badge></div><p className="text-go-secondary">This catalogue entry does not establish effective access for a member or role.</p><details className="text-go-secondary"><summary className="cursor-pointer font-medium">Technical details</summary><code className="mt-2 block rounded-xl bg-go-subtle p-3">{details.capability.action}</code></details><button className={secondary} onClick={() => setDetails(null)}>Close</button></div></Modal>}

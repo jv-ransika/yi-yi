@@ -26,7 +26,10 @@ export type ReportType =
   | "receipt_dispute"
   | "stock_discrepancy"
   | "late"
-  | "other";
+  | "other"
+  /** R-EXE-32: the driver's report at a stop, for the dispatcher to decide. */
+  | "store_closed"
+  | "cannot_unload";
 
 /** GET /api/threads/{id} and /by-subject?type=trip&id= */
 export type ThreadView = {
@@ -76,6 +79,10 @@ export type MessageView = {
   seenByDriverAt?: IsoInstant | null;
   /** FF-05: a voice note's machine transcript; absent for a typed message. */
   transcript?: TranscriptView | null;
+  /** The issue a report was made from (R-MSG-05): resolving the report resolves it (R-MSG-07). Absent from an older server. */
+  issueId?: Uuid | null;
+  /** The stop a report is about, so the dispatcher can act on it beside the report (R-EXE-31). Absent from an older server. */
+  aboutOutletId?: string | null;
 };
 
 /** Newest first; nextCursor reads older messages. */
@@ -134,4 +141,6 @@ export type TranscriptView = {
   status: "pending" | "done" | "none";
   text: string | null;
   language: "en" | "si" | "ta" | null;
+  /** R-MSG-15: false once the audio passed its retention and only the words are left. Absent from an older server. */
+  audioKept?: boolean;
 };

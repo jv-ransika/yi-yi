@@ -44,6 +44,8 @@ class EventCatalogueTest {
           "vehicle.at_depot",
           "delivery.completed",
           "delivery.failed",
+          "delivery.problem_reported",
+          "delivery.skipped",
           "eta.changed",
           "vehicle.fault_reported",
           "road.disruption_reported",

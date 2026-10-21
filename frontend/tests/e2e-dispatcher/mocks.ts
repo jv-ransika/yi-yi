@@ -4,6 +4,7 @@ import { answerInMock, askInMock } from "../decision-mocks.ts";
 import type { AnswerDecision, DecisionView } from "../../src/shared/domain/issues.ts";
 import { postToThread, redirectInThread, resolveInThread, threadRead, type ThreadMock } from "../thread-mocks.ts";
 import { nextRun } from "../../src/roles/dispatcher/data/scope.ts";
+import { PLAYBOOKS, storeClosed } from "../playbook-fixture.ts";
 import type { RunSheetStopView, RunSheetView } from "../../src/shared/domain/execution.ts";
 import type { ReadyTripView } from "../../src/shared/domain/loading.ts";
 import type { OrderStatus, OrderView } from "../../src/shared/domain/ordering.ts";
@@ -185,6 +186,26 @@ export async function serve(page: Page, start: Partial<Desk> = {}): Promise<Desk
     if (command.kind === "message:Post") {
       return postToThread(desk.threads ?? [], payload as unknown as PostMessagePayload, { name: SESSION.displayName, role: "dispatcher" }, new Date().toISOString());
     }
+    // R-EXE-31: Execution takes the stop off the trip under its version.
+    if (command.kind === "delivery:SkipStop" || command.kind === "delivery:EndTrip") {
+      const open = (st: RunSheetStopView) => st.outcome === "PENDING" || st.outcome === "ARRIVED";
+      const hit = (st: RunSheetStopView) =>
+        command.kind === "delivery:SkipStop" ? st.deliveryId === payload.deliveryId : st.tripId === payload.tripId && open(st);
+      let skipped = 0;
+      desk.sheets = desk.sheets.map((sheet) => ({
+        ...sheet,
+        stops: sheet.stops.map((st) =>
+          hit(st)
+            ? (skipped++, {
+                ...st, outcome: "SKIPPED" as const, rowVersion: st.rowVersion + 1,
+                // The driver's phone has not read the push yet.
+                skip: { then: (payload.then ?? "NEXT_DAY") as "NEXT_DAY" | "CANCEL", reason: String(payload.reason), wholeTrip: command.kind === "delivery:EndTrip", at: new Date().toISOString(), seenByDriver: false, seenByDriverAt: null },
+              })
+            : st,
+        ),
+      }));
+      return command.kind === "delivery:SkipStop" ? { deliveryId: payload.deliveryId, outcome: "SKIPPED" } : { tripId: payload.tripId, skipped };
+    }
     if (command.kind === "order:CloseForDay") return { alreadyClosed: false };
     if (command.kind === "plan:Generate") {
       // Planning v2 (R-PLN-41): Generate queues a job; the worker writes the draft and the screen follows the job.
@@ -357,6 +378,8 @@ export async function serve(page: Page, start: Partial<Desk> = {}): Promise<Desk
     if (pathname.startsWith("/api/plans/policies/")) {
       return route.fulfill(json({ policyVersionId: pathname.split("/").pop(), keys: ["PRIOR_SKIP", "FRESH", "CHILLED", "STRICT_WINDOW", "CADENCE", "EARLIEST_CLOSE", "LONGEST_DISTANCE", "LARGEST_VOLUME", "LONGEST_UNSERVED"] }));
     }
+    if (pathname === "/api/ml/playbooks") return route.fulfill(json(PLAYBOOKS));
+    if (pathname === "/api/ml/decision-suggestions") return route.fulfill(json(storeClosed(url.searchParams.get("deliveryId") ?? "")));
     if (pathname === "/api/ml/models") {
       return route.fulfill(json(desk.models ?? [
         { name: "datathon-task2a", version: "2026.1", kind: "demand_forecast", status: "ACTIVE", metrics: { total_wape: "0.0415", chilled_wape: "0.0439" } },

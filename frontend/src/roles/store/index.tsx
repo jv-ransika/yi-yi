@@ -108,7 +108,8 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
     live(["delivery", "eta", "trip", "plan", "receipt"]),
   );
   const orderIds = recentOrderIds(orders.data ?? [], today);
-  const issues = useResource(orderIds.length ? (s) => issuesForOrders(gateway, orderIds, s) : null, orderIds.join(","), 60_000);
+  // A raised or resolved issue at the outlet re-reads the list at once (F-07b); 60 s is the safety net.
+  const issues = useResource(orderIds.length ? (s) => issuesForOrders(gateway, orderIds, s) : null, orderIds.join(","), 60_000, live(["issue", "receipt"]));
 
   const { refresh: refreshOrders } = orders;
   const { refresh: refreshPending } = pending;
@@ -359,7 +360,7 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
   }
 
   return (
-    <div className="relative mx-auto flex min-h-dvh w-full max-w-[720px] flex-col gap-5 bg-go-canvas px-4 pt-5 pb-36 font-go text-go-ink sm:px-[25px] lg:max-w-none lg:pt-8 lg:pr-10 lg:pb-10 lg:pl-[300px]">
+    <div className="relative mx-auto flex min-h-[calc(100dvh-var(--demo-banner-h,0px))] w-full max-w-[720px] flex-col gap-5 bg-go-canvas px-4 pt-5 pb-36 font-go text-go-ink sm:px-[25px] lg:max-w-none lg:pt-8 lg:pr-10 lg:pb-10 lg:pl-[300px]">
       <TopBar
         online={online}
         syncedAt={orders.loadedAt}
@@ -374,7 +375,16 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
         unread={inbox.unread}
         onNotifications={gateway.sample ? undefined : () => setInboxOpen(true)}
       />
-      {thread && <TripMessages accountId={userId} open={thread} online={online} onQueued={queued} onClose={() => setThread(null)} />}
+      {thread && (
+        <TripMessages
+          accountId={userId}
+          open={thread}
+          online={online}
+          onQueued={queued}
+          onClose={() => setThread(null)}
+          delivery={"tripId" in thread ? (deliveries.data ?? []).find((d) => d.tripId === thread.tripId) ?? null : null}
+        />
+      )}
       {inboxOpen && <NotificationsDrawer inbox={inbox} onSubject={openSubject} onClose={() => setInboxOpen(false)} />}
       {warehouseDown && (
         <Notice tone="warning" live title={t("The warehouse is not answering")}>

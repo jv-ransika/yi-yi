@@ -106,6 +106,7 @@ test("an order placed by hand can be locked, and a regenerate can keep the decis
   await decision.getByRole("button", { name: "Place on VEH044 trip 1" }).click();
 
   await expect(decision.getByText("Placed on VEH044 Trip 1 by hand")).toBeVisible();
+  await expect(decision.getByText("Must go out in this plan, any truck")).toBeVisible();
   await decision.getByRole("switch", { name: "Lock" }).click();
   expect(desk.commands[1]).toMatchObject({ kind: "plan:Lock", expectedVersion: 1, payload: { planId: "plan-v2", orderId: "order-3" } });
 
@@ -363,6 +364,10 @@ test("the Decide step shows how the engine decides what waits, in the order it a
   await serve(page, { draft: draftPlan() });
   await page.goto("/#/plan");
   const policy = page.getByRole("region", { name: "How the engine decides what waits" });
+  // Folded to one line until the dispatcher opens it.
+  await expect(policy).toContainText("First: Deferred on an earlier run · 9 rules in order");
+  await expect(policy.getByRole("listitem")).toHaveCount(0);
+  await policy.getByText("How the engine decides what waits").click();
   await expect(policy.getByRole("listitem")).toHaveCount(9);
   await expect(policy.getByRole("listitem").first()).toHaveText("1.Deferred on an earlier run · no store is skipped twice in a row");
   await expect(policy.getByRole("listitem").nth(1)).toContainText("Fresh before other brands");

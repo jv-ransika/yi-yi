@@ -32,6 +32,7 @@ export default function LoadSheet({
   onBack,
   actingUserId,
   accountId,
+  depot,
 }: {
   gateway: LoadingGateway;
   trip: ReadyTripView;
@@ -47,9 +48,11 @@ export default function LoadSheet({
   actingUserId: string;
   /** The device's account: messages are kept on it with no signal. */
   accountId: string;
+  /** The depot's change stream re-reads the manifest when something commits there. */
+  depot?: string;
 }): React.JSX.Element {
   const tr = useT();
-  const t = useTrip(gateway, trip.tripId, online, waiting, onQueued, actingUserId);
+  const t = useTrip(gateway, trip.tripId, online, waiting, onQueued, actingUserId, depot);
   // An issue's optional voice note is posted on the trip's thread as the loader who entered their PIN.
   const tripThread = useTripThread(trip.tripId, accountId);
   const threadId = tripThread.data?.threadId ?? null;
@@ -268,6 +271,21 @@ export default function LoadSheet({
             }
             return outcome.ok;
           }}
+          online={online}
+          // Only before release, and only on a line the loader holds (R-ISS-17).
+          onFound={t.found && editable ? async (item, reason) => {
+            const line = t.lines.find((l) => l.items.some((i) => i === item)) ?? issueFor?.line;
+            if (!line) return tr("Choose the item again.");
+            const outcome = await t.found!(line, item, reason);
+            if (outcome.ok) {
+              setToast({ kind: "sent", at: businessNow(), title: tr("Flag removed"), detail: tr("The dispatcher sees the item as found and loaded.") });
+              return null;
+            }
+            // Said inside the sheet, where the loader is looking; not again behind it.
+            t.clearError();
+            const e = outcome.error;
+            return e instanceof ApiError || e instanceof TypeError || /network|fetch/i.test(e.message) ? friendlyError(e) : tr(e.message);
+          } : null}
           onClose={() => setIssueFor(undefined)}
         />
       )}

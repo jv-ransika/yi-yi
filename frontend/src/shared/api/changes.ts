@@ -1,3 +1,5 @@
+import { liveSource, type LiveSource } from "../live/tabStream.ts";
+
 // Roadmap F-07b: one live connection per set of depots, shared by every read on
 // the page. The server sends `change` with a topic and a depot when something
 // committed, and `ping` every 25 s; a read that listens for a topic re-reads
@@ -6,8 +8,17 @@
 // Silence is not trusted: with nothing heard for LIVE_SILENT_MS the connection
 // counts as down, and reads go back to their normal polling until it returns.
 
-/** With the stream up, a read still polls this often, as a safety net. */
-export const LIVE_FALLBACK_MS = 15_000;
+/**
+ * With the stream up, a read still polls this often, as a safety net: the stream
+ * says when to read, so the timer only catches a signal that was lost.
+ */
+export const LIVE_FALLBACK_MS = 60_000;
+/**
+ * With the stream down, a read that listens polls no faster than this. Its own
+ * interval may be quicker (2 s, from before the stream), but every open screen
+ * polling every 2 s is the load the stream exists to remove.
+ */
+export const LIVE_DOWN_MS = 10_000;
 /** Nothing heard for this long (heartbeats are every 25 s) and the stream counts as down. */
 export const LIVE_SILENT_MS = 45_000;
 
@@ -16,7 +27,7 @@ type Listener = (change: Change) => void;
 type StatusListener = (live: boolean) => void;
 
 type Stream = {
-  source: EventSource | null;
+  source: LiveSource | null;
   listeners: Set<Listener>;
   status: Set<StatusListener>;
   live: boolean;
@@ -36,11 +47,22 @@ export function outletWatch(outletId: string): string {
   return `outlet:${outletId}`;
 }
 
-/** The stream's query: `depot=` for a depot, `outlet=` for an outlet watched with {@link outletWatch}. */
+/** A driver watches the vehicle they drive on a day (live refresh, phase 3); watched alone. */
+export function vehicleWatch(vehicleId: string, date: string): string {
+  return `vehicle:${vehicleId}@${date}`;
+}
+
+/** The stream's query: `depot=`, `outlet=` for {@link outletWatch}, `vehicle=` and `date=` for {@link vehicleWatch}. */
 export function streamQuery(key: string): string {
   return key
     .split(",")
-    .map((place) => (place.startsWith("outlet:") ? `outlet=${encodeURIComponent(place.slice(7))}` : `depot=${encodeURIComponent(place)}`))
+    .map((place) => {
+      if (place.startsWith("vehicle:")) {
+        const [vehicle, date] = place.slice(8).split("@");
+        return `vehicle=${encodeURIComponent(vehicle ?? "")}&date=${encodeURIComponent(date ?? "")}`;
+      }
+      return place.startsWith("outlet:") ? `outlet=${encodeURIComponent(place.slice(7))}` : `depot=${encodeURIComponent(place)}`;
+    })
     .join("&");
 }
 
@@ -58,7 +80,8 @@ function setLive(stream: Stream, live: boolean): void {
 function open(key: string): Stream {
   const stream: Stream = { source: null, listeners: new Set(), status: new Set(), live: false, lastHeard: 0, watchdog: null };
   if (typeof EventSource === "undefined") return stream;
-  const source = new EventSource(`/api/changes/stream?${streamQuery(key)}`);
+  // On the tab's one live connection when it can be (live refresh, phase 2).
+  const source = liveSource("/api/changes/stream", streamQuery(key));
   const heard = () => {
     stream.lastHeard = Date.now();
     setLive(stream, true);
@@ -89,9 +112,23 @@ function open(key: string): Stream {
  * listener of the same depots. Returns what stops listening; the connection
  * closes with its last listener.
  */
+/** Every listener on the page, whatever it watches: what {@link announceChange} reaches. */
+const everyone = new Set<Listener>();
+
+/**
+ * Tells this page's screens that the person's own command changed a topic, so
+ * every screen that shows it reads again at once rather than waiting for the
+ * stream's signal or the next poll. The server's signal follows anyway; the
+ * second read is harmless.
+ */
+export function announceChange(change: Change): void {
+  for (const listener of [...everyone]) listener(change);
+}
+
 export function listenForChanges(depots: string[], onChange: Listener, onStatus: StatusListener): () => void {
   const key = streamKey(depots);
   if (!key) return () => {};
+  everyone.add(onChange);
   let stream = streams.get(key);
   if (!stream) {
     stream = open(key);
@@ -102,6 +139,7 @@ export function listenForChanges(depots: string[], onChange: Listener, onStatus:
   onStatus(stream.live);
   const held = stream;
   return () => {
+    everyone.delete(onChange);
     held.listeners.delete(onChange);
     held.status.delete(onStatus);
     if (held.listeners.size === 0) {

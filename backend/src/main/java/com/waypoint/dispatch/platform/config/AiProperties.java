@@ -21,8 +21,8 @@ import org.springframework.validation.annotation.Validated;
  * @param model the pinned model; blank takes the provider's default below
  * @param dailyCalls the most calls a day, across everyone: the spend cap in calls
  * @param timeout one call
- * @param jevEnabled Jev in shadow (roadmap AI-J1): it guesses each new issue's type from its
- *     text and the guess is recorded beside the real type; nobody sees it. Needs OPENROUTER_API_KEY
+ * @param jevEnabled Jev in shadow (roadmap AI-J1, R-ML-33): it guesses each new issue's type, and
+ *     each typed trip-chat report's situation, from its text and the guess is recorded beside the real type; nobody sees it. Needs OPENROUTER_API_KEY
  * @param jevModel pinned, never the latest alias: thresholds hold only for the version they were tuned on
  */
 @Validated
@@ -36,7 +36,9 @@ public record AiProperties(
     @DefaultValue("300") @Min(0) @Max(100_000) int dailyCalls,
     @DefaultValue("12s") @NotNull Duration timeout,
     @DefaultValue("false") boolean jevEnabled,
-    @DefaultValue("typesafe/jev-1.13") String jevModel) {
+    @DefaultValue("typesafe/jev-1.13") String jevModel,
+    /** The watcher's AI layer, in shadow (docs/issues/watch-review/PLAN.md); off by default. */
+    @DefaultValue("false") boolean watchReview) {
 
   public static final String GROQ = "groq";
   public static final String OPENROUTER = "openrouter";
@@ -51,7 +53,7 @@ public record AiProperties(
 
   public String pinnedModel() {
     if (model != null && !model.isBlank()) return model;
-    return OPENROUTER.equals(provider) ? "google/gemini-2.5-flash-lite" : "llama-3.1-8b-instant";
+    return OPENROUTER.equals(provider) ? "google/gemini-2.5-flash-lite" : "qwen/qwen3.8-27b";
   }
 
   @AssertTrue(message = "app.ai.provider must be groq or openrouter")

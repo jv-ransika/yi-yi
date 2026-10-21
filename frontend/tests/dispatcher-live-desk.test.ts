@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { IssueView, ReadyTripView, RunSheetStopView, RunSheetView, VehiclePositionView } from "../src/shared/domain/types.ts";
 import { vehicleDay } from "../src/roles/dispatcher/data/live.ts";
-import { activity, depotClock, filterRuns, limits, needCards, runsOf, tripBudget } from "../src/roles/dispatcher/data/liveDesk.ts";
+import { activity, depotClock, filterRuns, goodsToday, limits, needCards, runsOf, tripBudget } from "../src/roles/dispatcher/data/liveDesk.ts";
 
 const DATE = "2027-03-01";
 const NOW = new Date("2027-03-01T10:42:00Z"); // 16:12 in Colombo
@@ -57,6 +57,18 @@ test("needs you: a failed stop first, then the window closing soonest, then an i
   assert.equal(cards[2]!.meta, "reported 16:02");
 });
 
+test("a goods problem is no card but an orange stop, for today's open ones only (R-ISS-16)", () => {
+  const base = { severity: "MEDIUM", depotCode: "Kandy", subjects: [], description: "2 units damaged", assignee: null, resolutionAction: null, resolutionNote: null, raisedBy: "u", resolvedAt: null, rowVersion: 1 };
+  const goods = [
+    { ...base, issueId: "g1", type: "DAMAGED_GOODS", status: "OPEN", outletId: "OUT085", raisedAt: at("10:32"), quiet: true },
+    { ...base, issueId: "g2", type: "DAMAGED_GOODS", status: "RESOLVED", outletId: "OUT062", raisedAt: at("10:40"), quiet: true },
+    { ...base, issueId: "g3", type: "STOCK_DISCREPANCY", status: "OPEN", outletId: "OUT070", raisedAt: "2026-01-01T04:00:00Z", quiet: true },
+    { ...base, issueId: "l1", type: "VEHICLE_FAULT", status: "OPEN", outletId: "OUT099", raisedAt: at("10:45") },
+  ] as IssueView[];
+  assert.deepEqual(needCards([], goods, DATE, NOW).map((c) => c.issueId), ["l1"]);
+  assert.deepEqual([...goodsToday(goods, DATE)], ["OUT085"]);
+});
+
 test("filters keep a depot and a status, and count what the chips show", () => {
   const runs = runsOf(days([sheet("VEH001", [stop("VEH001", 1, { expectedArrival: at("11:40") })]), sheet("VEH002", [stop("VEH002", 1)])]), [], [], { VEH001: "Kandy", VEH002: "Peliyagoda" }, DATE, NOW);
   const kandy = filterRuns(runs, "Kandy", "all");
@@ -97,4 +109,25 @@ test("R-EXE-25: offline is the driver's phone not reaching the server, not a sta
   assert.equal(run(fresh, false).status, "offline", "not connected, though the last fix is fresh");
   // Without a presence read, the last fix still decides.
   assert.equal(runsOf(days([sheet("VEH020", [stop("VEH020", 1)])]), [trip("VEH020")], [stale], {}, DATE, NOW)[0]!.status, "offline");
+});
+
+test("a stop the driver reported closed is a card to decide, first with the failed ones (R-EXE-32)", () => {
+  const runs = runsOf(days([sheet("VEH001", [stop("VEH001", 1, { outcome: "ARRIVED", reportedProblem: "STORE_CLOSED" }), stop("VEH001", 2)])]), [], [], {}, DATE, NOW);
+  const card = needCards(runs, [], DATE, NOW).find((c) => c.id.startsWith("reported-"))!;
+  assert.equal(card.title, "OUT061 · store closed");
+  assert.equal(card.chip.text, "Decide");
+});
+
+test("each store waiting gets its own time, in trip order; a store already served gets none", async () => {
+  const { eachStoreMessages } = await import("../src/shared/messaging/templates.ts");
+  const msgs = eachStoreMessages({
+    serviceDate: DATE,
+    stops: [
+      stop("VEH001", 2, { expectedArrival: at("11:40") }),
+      stop("VEH001", 1, { outcome: "DELIVERED" }),
+      stop("VEH001", 3, { expectedArrival: at("12:30") }),
+    ],
+  });
+  assert.deepEqual(msgs.map((m) => m.outletId), ["OUT062", "OUT063"]);
+  assert.notEqual(msgs[0]!.body, msgs[1]!.body);
 });
