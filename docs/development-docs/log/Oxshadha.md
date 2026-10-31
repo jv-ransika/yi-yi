@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-31 - fix: the policy rule row lines up, and a voice note's words sit beside the play button
+
+`fix/policy-editor-and-voice-note-layout` · @Oxshadha
+
+- Admin policy editor: each rule's name and effect now have labels and line up with Actions and Resources below, with Remove at the row's end; the "has a condition" badge moved under the row.
+- Driver voice note player: the words under the heading now sit in the heading's column, so the play button is centred beside them. Notes with a waveform keep the words below it. Layout only, no flow changed.
+- Verified: `npm run typecheck`. Not run: the admin and driver browser suites.
+
+---
+
 ## 2026-10-22 - fix: Mark handled resolves the report's Issue too
 
 `dev` · @Oxshadha

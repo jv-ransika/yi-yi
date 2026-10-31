@@ -140,15 +140,27 @@ export default function PolicyEditor({ name, actions, onBack }: { name: string; 
         ) : (
           draft?.Statement.map((s, i) => (
             <fieldset key={i} aria-label={`Rule ${i + 1}`} className="space-y-2 rounded-2xl border border-go-rule p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <input aria-label="Name of the rule" className={`${field} max-w-56`} value={s.Sid ?? ""} onChange={(e) => edit(i, { Sid: e.target.value })} />
-                <select aria-label="Effect" className={`${field} max-w-32`} value={s.Effect} onChange={(e) => edit(i, { Effect: e.target.value as "Allow" | "Deny" })}>
-                  <option>Allow</option>
-                  <option>Deny</option>
-                </select>
-                {s.Condition !== undefined && <Badge tone="amber">Has a condition (kept as written)</Badge>}
+              {/* Name and effect line up with Actions and Resources below; Remove sits at the row's end. */}
+              <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
+                <label className="block text-sm">
+                  Rule name
+                  <input aria-label="Name of the rule" className={`${field} mt-1`} value={s.Sid ?? ""} onChange={(e) => edit(i, { Sid: e.target.value })} />
+                </label>
+                <label className="block text-sm">
+                  Effect
+                  <span className="relative mt-1 block">
+                    <select aria-label="Effect" className={`${field} appearance-none pr-9`} value={s.Effect} onChange={(e) => edit(i, { Effect: e.target.value as "Allow" | "Deny" })}>
+                      <option>Allow</option>
+                      <option>Deny</option>
+                    </select>
+                    <svg aria-hidden="true" viewBox="0 0 20 20" className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-go-secondary" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m5 8 5 5 5-5" />
+                    </svg>
+                  </span>
+                </label>
                 <button type="button" className={secondary} onClick={() => setDraft((d) => (d ? { ...d, Statement: d.Statement.filter((_, j) => j !== i) } : d))}>Remove</button>
               </div>
+              {s.Condition !== undefined && <Badge tone="amber">Has a condition (kept as written)</Badge>}
               <label className="block text-sm">
                 Actions
                 <input aria-label="Actions" list="policy-actions" className={`${field} mt-1`} value={s.Action.join(", ")} onChange={(e) => edit(i, { Action: listOf(e.target.value) })} />
