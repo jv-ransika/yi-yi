@@ -488,7 +488,7 @@ export type VoiceMessagePlayerProps = {
   statusColor?: string;
   /** The time of the notice, opposite the status. */
   statusTime?: string;
-  /** The words under that row, starting at the left edge. */
+  /** The words under the heading, in its column, so the play button sits centred beside them all. */
   message?: string;
   activeAudioId?: string | null;
   onPlayChange?: (id: string | null) => void;
@@ -733,10 +733,11 @@ export function VoiceMessagePlayer({
               <span className="shrink-0 font-go text-[13px] font-normal text-[#A9A9A9]">{duration}</span>
             </span>
           )}
+          {words && !bars && <span className={cx("mt-0.5 text-left text-[13px] font-light leading-4", isNight ? "text-white" : "text-black")}>{words}</span>}
         </span>
         {!heading && <span className="shrink-0 font-go text-[13px] font-normal text-[#A9A9A9]">{duration}</span>}
       </div>
-      {words && <p className={cx("text-left text-[13px] font-light leading-4", isNight ? "text-white" : "text-black")}>{words}</p>}
+      {words && bars && <p className={cx("pl-14 text-left text-[13px] font-light leading-4", isNight ? "text-white" : "text-black")}>{words}</p>}
     </div>
   );
 }
