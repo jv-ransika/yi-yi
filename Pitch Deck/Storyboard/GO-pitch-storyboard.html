@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waypoint GO · Pitch storyboard v1</title>
+<style>
+  :root {
+    --go: #00B050; --go-bright: #00DE72; --night: #001B09; --teal: #006A62;
+    --ink: #10231a; --muted: #5b6b62; --line: #e3e8e5; --soft: #f6f8f7; --amber: #b7791f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Google Sans Flex", "Google Sans", system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: #fff; line-height: 1.55; }
+  main { max-width: 1080px; margin: 0 auto; padding: 48px 28px 96px; }
+  h1 { font-size: 40px; line-height: 1.15; margin: 0 0 8px; font-weight: 600; }
+  h1 em, h2 em { font-style: normal; color: var(--go); }
+  h2 { font-size: 26px; margin: 64px 0 12px; font-weight: 600; }
+  h3 { font-size: 18px; margin: 0; font-weight: 600; }
+  p { margin: 0 0 12px; }
+  .meta { color: var(--muted); font-size: 14px; }
+  .thesis { margin-top: 28px; padding: 28px 32px; background: var(--night); color: #fff; border-radius: 20px; font-size: 22px; line-height: 1.45; }
+  .thesis b { color: var(--go-bright); font-weight: 600; }
+  .lead { font-size: 17px; color: var(--muted); max-width: 820px; }
+
+  /* Arc timeline */
+  .arc { display: grid; grid-template-columns: 2fr 0.9fr 0.45fr 5.8fr 1fr; gap: 6px; margin: 20px 0 8px; }
+  .arc div { padding: 12px 14px; border-radius: 12px; font-size: 14px; }
+  .arc .a1 { background: #eef1ef; }
+  .arc .a2 { background: #f3f4f3; color: var(--muted); }
+  .arc .a3 { background: var(--night); color: #fff; }
+  .arc .a4 { background: #e6f7ee; }
+  .arc .a5 { background: var(--go); color: #fff; }
+  .arc b { display: block; font-size: 15px; }
+
+  /* Ring */
+  .rings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0; }
+  .ringcard { border: 1px solid var(--line); border-radius: 16px; padding: 18px; text-align: center; }
+  .ringcard p { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
+  .ringcard h3 { font-size: 15px; margin-top: 8px; }
+  svg.ring { width: 84px; height: 84px; }
+  .demo-ring circle { transition: stroke-dasharray 1.4s ease, stroke 1.4s ease; }
+  .demo:hover .demo-ring circle { stroke-dasharray: 220 0; stroke: var(--go); }
+  .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .box { border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; }
+  .box ul { margin: 6px 0 0; padding-left: 20px; }
+  .box li { margin-bottom: 6px; }
+
+  /* Slides */
+  .slide { display: grid; grid-template-columns: 64px 1fr; gap: 18px; padding: 26px 0; border-top: 1px solid var(--line); }
+  .num { font-size: 14px; color: var(--muted); text-align: center; }
+  .num b { display: block; font-size: 28px; color: var(--ink); font-weight: 600; }
+  .num svg { width: 44px; height: 44px; margin-top: 8px; }
+  .slidehead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .time { font-size: 13px; padding: 2px 10px; border-radius: 99px; background: var(--soft); color: var(--muted); }
+  .act { font-size: 13px; color: var(--teal); }
+  .cols { display: grid; grid-template-columns: 1fr 1.25fr; gap: 20px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px; }
+  .say { background: var(--soft); border-radius: 14px; padding: 16px 18px; font-size: 15.5px; }
+  .say i { color: var(--muted); font-style: normal; font-size: 13px; }
+  .small { font-size: 14px; }
+  .small ul { margin: 0 0 10px; padding-left: 18px; }
+  .rec { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 6px; background: #e6f7ee; color: #0a6b39; margin-right: 4px; }
+  .reuse { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 6px; background: #e8f0ef; color: var(--teal); }
+  .confirm { background: #fff6e6; color: #8a5a00; padding: 0 5px; border-radius: 4px; font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin-top: 10px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; font-size: 13px; color: var(--muted); }
+  .total { font-weight: 600; }
+  .src { font-size: 13px; color: var(--muted); }
+  .src a { color: var(--teal); }
+  @media (max-width: 760px) { .cols, .rules, .rings { grid-template-columns: 1fr; } .arc { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+
+<p class="meta">Waypoint GO · Grand Finale pitch · Storyboard v4: rebuilt on the team's own flow · 27 October 2026 · 10 minutes</p>
+<h1>The pitch in one line: <em>people decide together, and on record</em></h1>
+
+<div class="thesis">
+  A delivery day breaks in hundreds of small ways. Every break lands on one person's phone.
+  GO does not replace the people who fix them. <b>It gives each of them the tools to decide together, quickly, and on record.</b>
+</div>
+
+<h2>Our flow, and where each point is</h2>
+<p class="lead">From the team's handwritten flow (Pitch Deck/Our idea of flow). This is the spine of the pitch; everything else hangs on it.</p>
+<table>
+  <tr><th>Our flow</th><th>Slide</th></tr>
+  <tr><td>Chess: problem → obvious solutions → but what we did</td><td>1-3 problem · 4 obvious answers · 5 the logo reveal, "but what we did"</td></tr>
+  <tr><td>Problem: demand handle · cognitive load (dispatcher) · communication</td><td>3, the three rings, in these words</td></tr>
+  <tr><td>Demand handle → scheduler · hire vehicle</td><td>7</td></tr>
+  <tr><td>Cognitive load → watcher · focus page · plan compare · drag and drop</td><td>8, one click each <span class="confirm">focus page read as "Needs you"; confirm</span></td></tr>
+  <tr><td>Communication → text based; why: freedom · LLM consumption · audit (for audit later, for live decision)</td><td>9, clicks 1-2</td></tr>
+  <tr><td>Problem: friction when typing → solve: report · template · voice; driver easy → template</td><td>9, clicks 3-4</td></tr>
+  <tr><td>Jev</td><td>9, click 5</td></tr>
+  <tr><td>Highlight issue vs report; same key terms everywhere</td><td>9, click 5, and the "Words we use" table</td></tr>
+  <tr><td>Other → admin configurations</td><td>13a</td></tr>
+  <tr><td>Future works → MCP</td><td>13b</td></tr>
+  <tr><td>Number based evidence</td><td>3 (485 cases), 12 (model numbers), 10 (decision time)</td></tr>
+  <tr><td>Demo SS</td><td>Screen recordings in device mockups, every answer slide</td></tr>
+</table>
+
+<h2>The arc</h2>
+<p class="lead">The chess move from our notes: show the problem, let the audience think of the obvious answers, show why each one fails, then show what we did. The logo reveal is the pivot from problem to answer. The close returns to the opening scene, so the "we need this" feeling lands on a story the audience already cares about.</p>
+<div class="arc">
+  <div class="a1"><b>1 · The morning</b>Hook and problem · 1:55</div>
+  <div class="a2"><b>2 · Obvious</b>0:35</div>
+  <div class="a3"><b>GO</b>0:15</div>
+  <div class="a4"><b>3 · What we did</b>Each problem answered, then the opening case solved · 5:50</div>
+  <div class="a5"><b>4 · Close</b>1:00</div>
+</div>
+<p class="meta">About 1,180 spoken words: 8.5 minutes at a calm pace, about 9:30 with the logo, the video and the pauses (v3, after the technical review). Read it aloud with a timer before trusting this.</p>
+
+<h2>The link between problem and answer: <em>the ring</em></h2>
+<p class="lead">No red. The link comes from our own logo animation, where "Ground Operations" collapses into a broken, dashed ring that closes into the O of GO. We use that ring as the one motif of the deck.</p>
+
+<div class="rings">
+  <div class="ringcard">
+    <svg class="ring" viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="#001B09" stroke-opacity=".55" stroke-width="6" stroke-linecap="round" stroke-dasharray="26 10"/></svg>
+    <h3>Open</h3>
+    <p>A problem nobody has answered yet. Night colour, dashed like the logo's ring.</p>
+  </div>
+  <div class="ringcard">
+    <svg class="ring" viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="#001B09" stroke-opacity=".25" stroke-width="6" stroke-linecap="round" stroke-dasharray="26 10"/></svg>
+    <h3>Stays open</h3>
+    <p>The obvious answers. Their rings fade but never close.</p>
+  </div>
+  <div class="ringcard demo">
+    <svg class="ring demo-ring" viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="#001B09" stroke-opacity=".55" stroke-width="6" stroke-linecap="round" stroke-dasharray="26 10"/></svg>
+    <h3>Closing</h3>
+    <p>Hover to see it. Same ring, same position, morphs shut and turns GO green.</p>
+  </div>
+  <div class="ringcard">
+    <svg class="ring" viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="#00B050" stroke-width="6"/></svg>
+    <h3>Closed</h3>
+    <p>Answered. On the last slide every closed ring merges into the O of GO.</p>
+  </div>
+</div>
+
+<div class="rules">
+  <div class="box">
+    <h3>Rules for the deck</h3>
+    <ul>
+      <li>Green appears only when a ring closes. Before the pivot the deck is white and night only, so green itself starts to mean "answered".</li>
+      <li>A ring keeps its exact position from the problem slide to its answer slide. Name both shapes <b>!!ring-demand</b>, <b>!!ring-load</b>, <b>!!ring-talk</b>, <b>!!ring-0652</b> so Morph pairs them.</li>
+      <li>Build the ring from the logo's own dash segments (arc shapes), not a dashed outline: Morph animates an arc's angle, but only cross-fades a change of dash style. Test both in PowerPoint and keep whichever looks smoother.</li>
+      <li>At most three open rings on screen at once. Too many open questions confuse more than they intrigue.</li>
+      <li>The speaker names the device once, on slide 3: "Hold on to these three." The cold-listener test showed a lone ring on slide 1 means nothing until then.</li>
+      <li>Never use the word "ring" in the script for anything else. An alert is "calls the dispatcher", not "rings".</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h3>Why it works</h3>
+    <ul>
+      <li><b>Closure.</b> A broken circle is still read as a circle, so the eye wants to complete it. The audience feels the gap before we name it.</li>
+      <li><b>Open loops.</b> An unanswered question holds attention until it is closed. The 06:52 case opens on slide 1 and closes on slide 10.</li>
+      <li><b>A motif that returns</b> means the audience does not have to work to reconnect a problem with its answer. The ring does it for them.</li>
+      <li><b>It is our brand.</b> The logo reveal teaches the motif, so the pivot slide and the final slide both mean something.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>What changed in v2, and why</h2>
+<p class="lead">Two reviewers with no knowledge of the project read only what the audience sees and hears. A cold listener scored the pitch 6 out of 10 for "we need this"; a decision-maker judge scored it 7, 5 and 6 out of 10 on intelligence, impact and the case for decision-makers. Both agreed the human-decides contrast is the strongest idea, and that slides 2, 10 and 11 of v1 carry it.</p>
+<table>
+  <tr><th>Found</th><th>Changed</th></tr>
+  <tr><td>Codes (OUT077, VEH057) slowed the listener; "Fresh" and "Waypoint" unclear</td><td>Store one, two and three; "Waypoint Fresh supermarkets"; "Waypoint Group runs 120 stores" said aloud on slide 3</td></tr>
+  <tr><td>"GO handles it" before GO was introduced; "register" unclear</td><td>"485 ways a morning goes wrong. We wrote a planned response for each."</td></tr>
+  <tr><td>Slides 3 and 4 overlapped</td><td>Merged into slide 3, built in four clicks</td></tr>
+  <tr><td>Rings unclear until late; "rings" also used for alerts</td><td>"Hold on to these three" on slide 3; alerts now "call the dispatcher"; ring renamed "One person's head" and "No record"</td></tr>
+  <tr><td>"Already asked the store" sounded like the software deciding</td><td>"Asking is automatic. Deciding is not."</td></tr>
+  <tr><td>Dock help described wrongly, and the cold chain question open</td><td>Store two lets the crew unload and reload; store one's goods stay cold in the van and go first on the next run</td></tr>
+  <tr><td>No offline moment in the hills</td><td>The driver's tap waits with no signal and sends when the signal returns, on slide 10</td></tr>
+  <tr><td>"No phone calls" right after "answers by voice"</td><td>"answers with a voice note"</td></tr>
+  <tr><td>Slide 8 overloaded; jargon (cutoff, mall windows, fuel quotas)</td><td>Four clicks; "when orders close at four", "mall delivery hours", "weekly fuel allowance"</td></tr>
+  <tr><td>"Freedom · Light · On record" read as philosophy; Jev unexplained</td><td>One line on screen, the reasons said in one sentence; "Jev, a small AI model"</td></tr>
+  <tr><td>Slide 5: straw man, real alternative missing</td><td>"Buy a routing or tracking tool: plans once at 16:00, blind after the van leaves"</td></tr>
+  <tr><td>Intelligence ladder abstract; numbers without baselines</td><td>Plain line; each number beside a baseline, to confirm</td></tr>
+  <tr><td>Engineering numbers meant nothing to a buyer; MCP jargon</td><td>Three assurances; MCP as one line</td></tr>
+  <tr><td>No measured impact, no ask</td><td>An eight-week Kandy pilot measured on four non-money numbers</td></tr>
+</table>
+
+<h2>Hard questions, and our answers</h2>
+<p class="lead">The judge's five hardest questions, answered from the rules as built. Whoever takes Q&amp;A should know these cold.</p>
+<table>
+  <tr><th>Question</th><th>Answer</th></tr>
+  <tr><td>At 06:52 on the Kandy corridor the van has no signal. What happens?</td><td>The driver's app works fully offline: taps, messages and voice notes wait on the phone and send when the signal returns, and nothing is lost. GO keeps estimating arrival from the last known position, so a held-up van still shows late. The watch asks the store anyway. If the driver has not seen a message after 10 minutes, the dispatcher is told to phone (R-NOT-18).</td></tr>
+  <tr><td>Who guarantees the cold chain for store one's goods?</td><td>Chilled goods never leave the refrigerated van for another store. Store two is only asked whether the crew may unload and reload at its dock to reach its own goods (R-ISS-12). Store one's order moves to the next operating day and goes first (R-EXE-31), and store one is told.</td></tr>
+  <tr><td>How much better than today's spreadsheet, and what is the false-alarm rate?</td><td>The slide 12 numbers, each against its baseline, from the ML owner. Have the exact figures and the test period ready.</td></tr>
+  <tr><td>If we approve tomorrow, what do the first 30 days look like?</td><td>The Kandy depot: weeks 1-4 beside today's process, weeks 5-8 live. Drivers use their own phones, install it from the browser, and get a guided tour on the first run; loaders use a shared tablet, dispatchers a desktop. Stop if the four measures on slide 14 do not move.</td></tr>
+  <tr><td>Does "how often each option was chosen" just repeat old habits? Who is accountable?</td><td>Cards are never preselected and never act. Until a situation has 20 decided cases they come from rules, not history. Every decision is recorded with the person and their reason, and outcomes are measured (delivered next run, a store left waiting twice), not just which card was tapped.</td></tr>
+  <tr><td>What is the planner, and how close to the best is it?</td><td>A constraint-checked allocation engine, then a cost stage (ALNS) that keeps the served set, measured against an exact solver (CP-SAT, SCIP) and OR-Tools on the peak day, historic and synthetic days (docs/issues/219-planning-v2/benchmark). Have the gap to the exact maximum ready.</td></tr>
+  <tr><td>What is Jev, where does it run, and how accurate is it?</td><td>A small decision model that only picks one of the problem types code allows, and writes no text. It reads masked text: no names, phones or ids. 58 of 60 on our labelled set (English 41/41, Sinhala 6/6, Tamil 6/6, Singlish 5/7), median 0.5 s. The set is small and written by us, so production scores decide. Off unless a depot agrees.</td></tr>
+  <tr><td>How does data get in, and how hard is a second depot?</td><td>Orders and products come from the warehouse API (polled and matched); reference data (outlets, vehicles, calendar) is imported as a versioned, all-or-nothing publish. A depot is reference data plus scope grants.</td></tr>
+  <tr><td>Do 120 store managers need devices and training? What if they do not answer?</td><td>A phone or the counter desktop, in the browser. A question unanswered by its deadline expires once, and the dispatcher is told to phone (R-ISS-13); today's rules then apply.</td></tr>
+  <tr><td>Who supports it after the competition?</td><td>Team answer needed: support model, hosting (one server, Docker Compose), and handover.</td></tr>
+</table>
+
+<h2>Backup slides, after "Thank you"</h2>
+<p class="lead">The technical reviewer asked for these in Q&amp;A, not in the 10 minutes. One slide each, only shown if asked.</p>
+<table>
+  <tr><th>Backup</th><th>Content</th><th>Source in the repository</th></tr>
+  <tr><td>B1 Architecture</td><td>Four role apps (installable web apps) → one backend in modules → PostgreSQL with row-level security; outbox events; model service; speech service</td><td>SYSTEM-ARCHITECTURE.md, docs/architecture/MODULES.md</td></tr>
+  <tr><td>B2 Offline and sync</td><td>Driver full offline, loader and store resilient, dispatcher online; a held write is shown to a person, never merged</td><td>frontend/src/shared/offline/tiers.ts, EDGE-CASES "Human-in-the-loop conflict"</td></tr>
+  <tr><td>B3 Security and access</td><td>Policies as data (Effect, Action, Resource, Condition); policy and scope; server-side sessions; every denied attempt audited; personal data masked from AI</td><td>AGENTS.md Authorization, RULES-AND-POLICIES R-IAM-*</td></tr>
+  <tr><td>B4 The planner</td><td>Constraints, explanations, the benchmark against exact solvers</td><td>docs/issues/219-planning-v2/</td></tr>
+  <tr><td>B5 The models</td><td>Late risk, service time, demand: features, test period, baselines, fallback, shadow and promotion</td><td>docs/datathon/, ml-server/README.md</td></tr>
+  <tr><td>B6 Integration</td><td>Warehouse API, reference import, MCP for AI assistants</td><td>docs/issues/007-warehouse/, mcp/README.md</td></tr>
+</table>
+
+<h2>The features we show, and where</h2>
+<p class="lead">Every feature the team asked to highlight, the slide that carries it and the recording that proves it. Checked against the code on 27 October 2026.</p>
+<table>
+  <tr><th>Feature</th><th>Slide</th><th>Recording</th><th>In the code</th></tr>
+  <tr><td>Plan compare</td><td>7, click 3</td><td>R1</td><td>Built · PlanCompare.tsx</td></tr>
+  <tr><td>Edge case handling in the trip's chat (the problem room)</td><td>9, 10</td><td>R3, R4</td><td>Built · ProblemRoom.tsx</td></tr>
+  <tr><td>Reply and decision cards that follow the situation, for the dispatcher and the store manager</td><td>9, 10</td><td>R3, R4</td><td>Built · ReportSuggestions.tsx, storeReplies in templates.ts</td></tr>
+  <tr><td>The watch that calls the dispatcher, and asks the store by itself; "Needs you" on Live</td><td>8, 10</td><td>R2, R4</td><td>Built · LiveNeeds.tsx (attention watch, R-ISS-15)</td></tr>
+  <tr><td>Driver voice messages, read aloud when stopped</td><td>9</td><td>R9</td><td>Built (messaging, R-MSG-09 to 11)</td></tr>
+  <tr><td>MCP</td><td>13</td><td>none, one line</td><td>Built · mcp/</td></tr>
+  <tr><td>Dark Driving mode while moving, for safety</td><td>9</td><td>R9</td><td>Built · DrivingModeScreen.tsx (R-EXE-28)</td></tr>
+  <tr><td>Damaged goods photos by the loader and the store manager</td><td>11</td><td>R7</td><td>Built · loader IssueSheet.tsx, store receive</td></tr>
+  <tr><td>Fuel QR</td><td>6</td><td>R10</td><td>Built · FuelPassSheet.tsx</td></tr>
+  <tr><td>Tour guide for the driver app</td><td>14</td><td>R11</td><td>Agreed with @jv-ransika; pull request due 28 October 2026. Record R11 once it is merged.</td></tr>
+  <tr><td>Plain-language explanations: every waiting order and the whole plan, with where it came closest and the smallest change</td><td>7, click 2; 12</td><td>R1</td><td>Built · ExplainSheet.tsx, ExplainPlanSheet.tsx, data/explain.ts (AI-2), WhatIfCard.tsx</td></tr>
+  <tr><td>Order day suggestions for the store manager</td><td>7, click 1</td><td>R8</td><td>Built · DateStrip.tsx, RideAlongHint.tsx</td></tr>
+</table>
+
+<h2>Slide by slide</h2>
+<p class="lead">Each slide: what is on screen, the screen recording to play inside the device mockup, how it builds, and the words to say. Recordings are listed together after the slides. "Reuse" marks an existing GO.pptx slide to keep as it is.</p>
+
+<!-- 1 -->
+<section class="slide">
+  <div class="num"><b>1</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#001B09" stroke-opacity=".55" stroke-width="4" stroke-linecap="round" stroke-dasharray="13 5"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>06:52, near Kandy</h3><span class="time">0:25</span><span class="act">Act 1 · hook</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Night background (the deck's 3 AM colour). A phone mockup, lock screen at 06:52.</li>
+          <li>Notifications stack in one by one, in the Messages style from GO.pptx: "Van 57 · Road blocked, moving slowly" · "Fresh store 1 stops receiving at 07:30" · "Fresh store 2 · Where is our delivery?". Plain names on screen; outlet ids (OUT077, OUT079, OUT080) only small and grey, if at all.</li>
+          <li>On the last click, one open ring appears beside the phone: <b>!!ring-0652</b>.</li>
+        </ul>
+        <p class="label">Build</p>
+        <p>Three clicks, one per notification. No title until the question.</p>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Six fifty-two in the morning, near Kandy. A refrigerated van is carrying chilled goods for three Waypoint Fresh supermarkets, and the road is blocked. <i>(click)</i> Store one stops receiving at seven thirty. The van will not be there before ten to eight. <i>(click)</i> The phones start ringing. <i>(pause)</i> What should the dispatcher do?
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="slide">
+  <div class="num"><b>2</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#001B09" stroke-opacity=".55" stroke-width="4" stroke-linecap="round" stroke-dasharray="13 5"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>It is not a simple swap</h3><span class="time">0:35</span><span class="act">Act 1</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>The van seen from above, three blocks of goods: store 1 by the door (loaded last), store 2 in the middle, store 3 at the back.</li>
+          <li>An arrow from the door to store 2 is blocked by store 1's goods.</li>
+          <li>Three choices appear, each with a small open ring: "Ask store 1 to receive later" · "Ask store 2: may we lift store 1's goods out at your dock for a minute, take yours, and put them back?" A short animation shows it: store 1's block out, store 2's block off, store 1's block back in · "Bring store 1's goods back, deliver tomorrow".</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        It looks simple: skip store one, go to store two. But the van was loaded last in, first out. <i>(click)</i> Store one's goods are by the door, in front of everything else. <i>(click)</i> So there are three choices. Ask store one to receive later. Ask store two to let the crew lift store one's goods out at its dock for a minute, take its own, and put store one's back. Or bring store one's goods home and try tomorrow. <i>(pause)</i> Every one of them needs another person to agree. Right now. By phone.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="num"><b>3</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#001B09" stroke-opacity=".55" stroke-width="4" stroke-linecap="round" stroke-dasharray="13 5"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Every morning, 120 stores wait on one spreadsheet</h3><span class="time">0:55</span><span class="act">Act 1</span><span class="reuse">Reuse GO.pptx 2-3</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Click 1, GO.pptx slide 2 as it is: Fresh 80 · Style 25 · Tech 15; 2 depots · 60 vehicles, only 16 can carry chilled.</li>
+          <li>Click 2, GO.pptx slide 3 as it is: how a delivery runs today (phoned in, typed into a spreadsheet, printed list, paper sheet).</li>
+          <li>Click 3: six case cards flood in, each with an open ring: Truck breaks down · Nobody at the store · "Three cartons missing" against "All loaded" · Chilled goods arrive damaged · Mall loading bay closes · Waited yesterday too. One large line: <b>485</b> "ways a morning goes wrong · each with a handling rule and a test"</li>
+          <li>Click 4: the cards fade; three open rings remain in a row, in plain words: <b>Demand handling</b> · <b>Cognitive load</b> · <b>Communication</b> (<b>!!ring-demand</b>, <b>!!ring-load</b>, <b>!!ring-talk</b>). They stay in place until slides 7, 8 and 9 close them.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Waypoint Group runs a hundred and twenty stores in three brands on sixty vehicles, and every morning they wait on one spreadsheet. <i>(click)</i> Orders by phone, a plan in a spreadsheet, paper on the road. <i>(click)</i> And the van is only one case. A truck breaks down. Nobody is at the store. A store says three cartons are missing; the loader says they were loaded. We catalogued four hundred and eighty-five ways a morning goes wrong, each with a rule for handling it and a test. <i>(click)</i> Underneath them are three problems. Demand handling: most days there are more orders than the fleet can carry. Cognitive load: the whole day sits in one dispatcher's head. And communication: phone calls, paper and memory, with no feedback and no record. Hold on to these three.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="num"><b>4</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#001B09" stroke-opacity=".25" stroke-width="4" stroke-linecap="round" stroke-dasharray="13 5"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>The obvious answers</h3><span class="time">0:35</span><span class="act">Act 2</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Three cards, each with a faded open ring that never closes:</li>
+          <li><b>Let AI decide everything.</b> "Who answers when it gets it wrong?"</li>
+          <li><b>Buy a routing or tracking tool.</b> "It moves the van. It doesn't get the store to agree."</li>
+          <li><b>Start a WhatsApp group.</b> "Fast. No structure. No record."</li>
+        </ul>
+        <p class="label">Build</p>
+        <p>Each card's verdict on its own click. The cards fade back as the slide ends.</p>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        There are three obvious answers. <i>(click)</i> Let AI decide everything. But when it leaves the same store waiting two days running, who answers for it? And it does not know which manager opens late, or which road floods. <i>(click)</i> Buy a routing tool. It can move the van, but it cannot get a store to agree, and it records nobody's decision. <i>(click)</i> Start a WhatsApp group. Fast, but nothing in it is structured, and nothing is on record. <i>(pause)</i> Each one fixes one thing and breaks another.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="num"><b>5</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>But what we did · the logo reveal</h3><span class="time">0:15</span><span class="act">Pivot</span><span class="reuse">Reuse GO.pptx 1 (logo video)</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>White again. The logo animation plays: "Ground Operations" collapses into the dashed ring, the ring spins and closes into the O of GO.</li>
+          <li>Under it, one line: "GO watches. GO suggests. GO records. A person decides."</li>
+          <li>This is the first green in the deck.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        So we, Team Xception, built something else for Waypoint Group. We call this work Ground Operations: everything between the order and the shelf. <i>(the animation plays)</i> This is Waypoint GO. <i>(click)</i> GO watches, suggests and records. A person decides.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="num"><b>6</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#001B09" stroke-opacity=".55" stroke-width="4" stroke-linecap="round" stroke-dasharray="13 5"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Four people, one record</h3><span class="time">0:25</span><span class="act">Act 3</span><span class="reuse">Reuse GO.pptx 13-16</span><span class="rec">R6</span><span class="rec">R10</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>The role carousel as it is (store manager, dispatcher, loader, driver), with a 3 to 4 second recording playing in each role's device.</li>
+          <li>The driver's card plays R10: the Fuel QR opened at the pump with no signal bars.</li>
+          <li>The three open rings from slide 3 sit small in a corner: they are what the next three slides close.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        One app for the four people who touch every order. <i>(click)</i> The store manager. <i>(click)</i> The dispatcher. <i>(click)</i> The loader. <i>(click)</i> And the driver, even with no signal, down to the fuel pass QR at the pump.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="num"><b>7</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Demand handling, answered: scheduler, hire vehicle</h3><span class="time">0:50</span><span class="act">Act 3 · closes !!ring-demand</span><span class="rec">R8</span><span class="rec">R1</span><span class="rec">R1b</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>A flow tag at the top shows where we are in our flow: <b>Scheduler</b>, then <b>Hire vehicle</b>.</li>
+          <li>Click 1, Scheduler (store): phone playing R8, the store manager orders on a day a trip already goes; busy days warned.</li>
+          <li>Click 2, Scheduler (dispatcher): laptop playing R1, Generate, and the explanation card: what happened, the rule, where it came closest, the smallest change, what to do next.</li>
+          <li>Click 3, Hire vehicle: R1b, the forecast turns a busy week into vehicles to hire. The demand ring closes.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        First, demand handling. It starts with the scheduler. When a store manager orders, GO suggests a day when a trip already goes to that area, and warns when a day is busy. <i>(click)</i> When orders close at four, the dispatcher asks GO for a plan. In seconds it places every order it can, within every vehicle's limits, and every order that has to wait is explained: the rule that stopped it, where it came closest, and the smallest change that would make room. <i>(click)</i> And when demand will outgrow the fleet, the forecast says ten weeks ahead which vehicles to hire. Before the festival, not on the morning.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="num"><b>8</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Cognitive load, answered: watcher, focus page, plan compare, drag and drop</h3><span class="time">0:50</span><span class="act">Act 3 · closes !!ring-load</span><span class="rec">R2</span><span class="rec">R1</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Four flow tags in a row: <b>Watcher · Focus page · Plan compare · Drag and drop</b>; the current one is dark, the others grey. One click each.</li>
+          <li>Watcher: Live, GO's watch calls the dispatcher only when needed, the store already asked. "[N] trips on the road · you were needed [M] times".</li>
+          <li>Focus page: "Needs you", only what needs the dispatcher now, one next step at a time <span class="confirm">confirm this is what the team means by focus page</span>.</li>
+          <li>Plan compare: two plans side by side. Drag and drop: a stop moved by hand, checked against every rule. Then "Asking is automatic. Deciding is not." The load ring closes.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Second, cognitive load. The watcher: GO watches every trip on the live screen, and calls the dispatcher only when a decision is needed. It has often already asked the store, so the answer is waiting. <i>(click)</i> The focus page shows only what needs the dispatcher now, one next step at a time. <i>(click)</i> Plan compare: two plans side by side before publishing. <i>(click)</i> And drag and drop: the dispatcher moves a stop by hand, and GO checks it against every rule. Asking is automatic. Deciding is not.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <div class="num"><b>9</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Communication, answered: text based, why, report · template · voice</h3><span class="time">1:00</span><span class="act">Act 3 · closes !!ring-talk</span><span class="rec">R3</span><span class="rec">R9</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Click 1, <b>Text based</b>: one conversation per trip, for everyone on it (R3).</li>
+          <li>Click 2, <b>Why text</b>: three cards, <b>Freedom</b> (say what really happened) · <b>LLM consumption</b> (a message needs no AI to arrive; AI only where it helps) · <b>Audit</b> (for audit later, and for live decisions now).</li>
+          <li>Click 3, <b>Friction when typing</b>: the same three card slots morph into <b>Report</b> (one tap) · <b>Template</b> (ready replies; driver easy) · <b>Voice</b>.</li>
+          <li>Click 4, night: Driving mode, the phone dark while moving, messages read aloud when stopped, in සිංහල · தமிழ் · English (R9).</li>
+          <li>Click 5: <b>Jev</b> (free text, even Singlish, into a known problem; 58 of 60 test reports) and <b>Same words, everywhere</b>: Report = what a person says from the field; Issue = the problem GO records from it, with an owner until closed. The communication ring closes.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Third, communication. We made it text based: one conversation per trip, for everyone on it. <i>(click)</i> Why text? Freedom: people say what really happened, not only what a form allows. Low LLM consumption: a message needs no AI to arrive, so AI is used only where it helps. And audit: every word has a name and a time, for audit later and for live decisions now. <i>(click)</i> But typing is friction, especially for a driver. So we added three things: reports in one tap, templates of ready replies, and voice. <i>(click)</i> And while the van moves, the phone goes dark. When it stops, messages are read aloud in Sinhala, Tamil or English, and the driver answers with a voice note. <i>(click)</i> When someone writes in their own words, Jev sorts it into a known problem. And we keep two words apart everywhere: a report is what someone says from the field; an issue is the problem GO records from it, with an owner until it is closed.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide">
+  <div class="num"><b>10</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Back to 06:52</h3><span class="time">1:10</span><span class="act">Act 3 · closes !!ring-0652</span><span class="rec">R4</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Three devices side by side: driver's phone, dispatcher's laptop, store's phone. R4 plays in short segments, one per click, on whichever device acts.</li>
+          <li>Click 1: the driver's tap with no signal bars, a "waiting to send" mark, then sent as the bars return.</li>
+          <li>A depot clock, large, moves from 06:52 to the decision time. The speaker says the time aloud.</li>
+          <li>Last click: store 1's goods shown staying in the chilled van; the ring from slide 1 returns in the same place and closes.</li>
+        </ul>
+        <p class="label">Note</p>
+        <p>This slide carries the pitch. Rehearse it most. Use the real times from R4.</p>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Now, back to six fifty-two. <i>(click)</i> The driver taps "Running late". One tap. No signal here, so it waits on the phone and sends when the signal returns. <i>(click)</i> GO sees store one will be missed, and asks it: can someone receive at about seven fifty? <i>(click)</i> The manager answers with a voice note: no, our staff leave at seven thirty. <i>(click)</i> GO proposes the next step, with the fact behind it: move store one to the next run. The dispatcher confirms, and store one is told its order goes first. <i>(click)</i> Then GO's next step: store one's goods are in front of store two's, so ask store two's dock. The dispatcher sends it. Yes. <i>(click)</i> The crew lifts store one's goods out, takes store two's, and puts them back to stay cold, and the van carries on to stores two and three. The driver sees the new plan on the phone. <i>(click)</i> Decided by [time from R4]. "What happened" keeps who asked, who answered, what was decided, and why. Not one phone call.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="num"><b>11</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Every case gets the same tools</h3><span class="time">0:35</span><span class="act">Act 3</span><span class="rec">R7</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Four of the case cards from slide 3 come back (Morph), and each ring closes with one line under it:</li>
+          <li>Truck breaks down → the driver marks it broken; GO replans its remaining trips.</li>
+          <li>Nobody at the store → reported from the door; the dispatcher decides; the store is told.</li>
+          <li>Missing against loaded → the loader's check, photos and the store's one-time handover PIN.</li>
+          <li>Damaged goods → the loader photographs it at the dock, the store manager at receipt; an issue opens that someone owns. R7's two photo clips side by side, tablet and phone.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Every other case gets the same tools. <i>(click)</i> A truck breaks down: the driver marks it broken, and GO replans its remaining trips. <i>(click)</i> Missing against loaded, or damaged on arrival: the loader's check and photos at the dock, the store's photos and one-time PIN at receipt. Evidence, not memory.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="num"><b>12</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Intelligence where it helps, a person where it counts</h3><span class="time">0:45</span><span class="act">Act 3</span><span class="reuse">Reuse GO.pptx 10-11</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>The "Three kinds of intelligence, under one rule" slide, with plainer card titles: <b>Predict lateness · Forecast demand · Decide the plan</b>.</li>
+          <li>One proof number under each card, each beside a baseline <span class="confirm">confirm with the ML owner</span>: "7 in 10 late deliveries flagged before departure, 74% fewer false alarms than a simple method" · "Demand within about 3% over ten weeks, against 8% for same week last year" · "Busiest day: [N] of 85 orders served; no plan can serve more than 79 · every one that waits explained".</li>
+          <li>The line underneath, in plain words: Rules check every plan → our models predict → a small AI reads words → a person decides.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        So where is the intelligence? Wherever it saves a person time, and never where it takes the decision away. <i>(click)</i> Our models flag seven in ten late deliveries before the van leaves, with far fewer false alarms than a simple method. They forecast demand ten weeks ahead, within about three per cent. And on Waypoint's busiest day in the data, with too few vans, the planner serves [N] of eighty-five orders, where no plan can serve more than seventy-nine, and explains every one that waits.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="num"><b>13</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>Other: admin configurations · Future works: MCP</h3><span class="time">0:45</span><span class="act">Act 3</span><span class="rec">R5</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Slide 13a, tag <b>Other</b>: "Admin configurations, not code changes": Users and permissions (policies like a cloud console) · Rules and parameters (thresholds, windows, calendar) · Audit. R5 plays the permission editor. "If something fails, GO keeps working and says so on screen."</li>
+          <li>Slide 13b, tag <b>MCP</b>: "Future works, ready for agents": GO already has an MCP server; when Waypoint is ready for AI agents they work under the same permissions and audit as a person. The path: GO asks by itself → a person decides → taken again and again → GO may act alone.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Everything else is configuration. An administrator manages users and permissions like a cloud console, and the planning rules, without a new release. Every decision and every change is audited. And if something fails, GO keeps working and says so on screen. <i>(click)</i> And future work is already started. GO has an MCP server: when Waypoint is ready for AI agents, they connect under the same permissions and the same audit as a person. And where a suggestion is taken again and again, a depot can let GO act alone.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 -->
+<section class="slide">
+  <div class="num"><b>14</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/></svg></div>
+  <div>
+    <div class="slidehead"><h3>What changes, and how we prove it</h3><span class="time">0:40</span><span class="act">Close</span><span class="reuse">Reuse GO.pptx 8 layout</span><span class="rec">R11</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>The "One delivery day, One record" layout as before and after, one line per person:</li>
+          <li>Dispatcher: the switchboard → GO watches, they decide. Loader: a printed list that goes stale → shortfalls flagged before the van leaves. Driver: paper and calls → a guided tour on the first run (R11), then one tap, even offline. Store manager: "where is my delivery?" → asked before being skipped. Management: decisions in memory → every decision explained.</li>
+          <li>Click: the pilot, with four measures and no money: <b>Fresh stores served before 08:00 · minutes from report to decision · stores left waiting two days running · how often GO's suggestion is taken</b>.</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        <i>(the before and after builds, unspoken, for three seconds)</i> <i>(click)</i> We propose an eight-week pilot at the Kandy depot, measured on four numbers: Fresh stores served before eight, minutes from a report to a decision, stores left waiting two days running, and how often GO's suggestion is taken.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide">
+  <div class="num"><b>15</b><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="#00B050" stroke-width="4"/><text x="22" y="27" text-anchor="middle" font-size="13" font-weight="700" fill="#001B09">GO</text></svg></div>
+  <div>
+    <div class="slidehead"><h3>Same morning</h3><span class="time">0:20</span><span class="act">Close</span></div>
+    <div class="cols">
+      <div class="small">
+        <p class="label">On screen</p>
+        <ul>
+          <li>Night again, the phone from slide 1. The same notifications, now answered: "Store 2 helped at its dock · Store 1 first on the next run · decided [time from R4]".</li>
+          <li>Every closed ring in the deck flies to the centre and merges into the O of GO: the logo animation in reverse.</li>
+          <li>Last frame: "Waypoint GO · Ground Operations, decided together."</li>
+        </ul>
+      </div>
+      <div class="say">
+        <p class="label">Say</p>
+        Same morning. Same blocked road. <i>(click)</i> This time it was decided in [N] minutes, everyone was told, and it is on record. <i>(pause)</i> Waypoint GO. Ground Operations, decided together. Thank you.
+      </div>
+    </div>
+  </div>
+</section>
+
+<h2>Screen recordings to capture</h2>
+<p class="lead">Record on the demo control room (#231) so the clock, the vehicles and the scenario are the same every take. Use real data from the seeded day, not mock screens.</p>
+<table>
+  <tr><th>Id</th><th>Device</th><th>Flow</th><th>Length</th><th>Slide</th></tr>
+  <tr><td>R1</td><td>Laptop</td><td>Dispatcher Plan: Generate → the waiting orders → Explain on one of them (closest place, smallest change), zoomed → Edit trip, move a stop → Compare → Publish</td><td>25 s</td><td>7</td></tr>
+  <tr><td>R1b</td><td>Laptop</td><td>Forecast: a busy week → Hire vehicles decision recorded</td><td>8 s</td><td>7</td></tr>
+  <tr><td>R2</td><td>Laptop</td><td>Live: map with simulated vehicles, a stop turning at risk, the alert, "Needs you" with the store's answer already beside it. Note how many trips ran and how many times the dispatcher was needed</td><td>20 s</td><td>8</td></tr>
+  <tr><td>R3</td><td>Two phones, laptop</td><td>Trip conversation: a one-tap report; the dispatcher's reply cards; the store manager's cards changing with the delivery ("We are open now", "Deliver on the next day")</td><td>15 s</td><td>9</td></tr>
+  <tr><td>R4</td><td>Phone, laptop, phone</td><td>The 06:52 case end to end. Driver taps Running late with the phone offline, then it sends when back online → GO asks store 1 (OUT077) "receive at about 07:50?" by itself → No, with a voice note → the dispatcher asks store 2 (OUT079) for dock help → Yes → the dispatcher chooses Skip to next day for store 1 with a reason → the driver's run updates → "What happened". Record each device separately on the same demo clock, then cut into click segments. Write down the decision time</td><td>45 s</td><td>10</td></tr>
+  <tr><td>R5</td><td>Laptop</td><td>Admin permission editor: change a policy, see who it affects, save</td><td>10 s</td><td>13</td></tr>
+  <tr><td>R6</td><td>Each device</td><td>One loop per role for the carousel: store places an order, dispatcher plan, loader checks a line, driver hands over with the PIN</td><td>4 × 4 s</td><td>6</td></tr>
+  <tr><td>R7</td><td>Phone, tablet</td><td>Short clips: driver marks the vehicle broken; loader flags a damaged line with a photo at the dock; store receipt with a damage photo and the PIN</td><td>3 × 4 s</td><td>11</td></tr>
+  <tr><td>R8</td><td>Phone</td><td>Store manager places an order: the date strip, a busy day, the suggested day "likely to travel on the same trip"</td><td>8 s</td><td>7</td></tr>
+  <tr><td>R9</td><td>Phone</td><td>Driver on a simulated run: the van moves and Driving mode goes dark with controls hidden; the van stops and new messages play aloud in order; the driver answers with a voice note</td><td>12 s</td><td>9</td></tr>
+  <tr><td>R10</td><td>Phone</td><td>Driver opens the Fuel QR from the run with the phone offline</td><td>4 s</td><td>6</td></tr>
+  <tr><td>R11</td><td>Phone</td><td>Driver's first sign-in: the guided tour's first three steps</td><td>5 s</td><td>14</td></tr>
+</table>
+<p class="small" style="margin-top:12px">Format: H.264 MP4, 30 fps, at the mockup's screen ratio, cropped to the screen with no browser bars or cursor. Set each to start "With previous" and play once (the carousel loops). Keep each under about 8 MB: GO.pptx is already 16.5 MB.</p>
+
+<h2>Words we use, everywhere</h2>
+<p class="lead">From our notes: the same key terms on every slide and in every sentence. These follow the glossary in the repository.</p>
+<table>
+  <tr><th>Say</th><th>Means</th><th>Never say</th></tr>
+  <tr><td>report</td><td>What a person sends from the field: one tap, a message or a voice note</td><td>complaint, ticket</td></tr>
+  <tr><td>issue</td><td>A recorded problem with a type, severity and status, that someone owns</td><td>ticket, case, incident</td></tr>
+  <tr><td>deferred (in the app); "has to wait" (in speech)</td><td>An order left out of today's plan, kept for a later day, with the rule that decided it. The cold listener did not know the word, so the script says "has to wait"</td><td>postponed, skipped (for orders)</td></tr>
+  <tr><td>store one, store two</td><td>In speech and on slides, for the 06:52 stores. Outlet ids only small and grey</td><td>OUT077 read aloud</td></tr>
+  <tr><td>calls the dispatcher</td><td>When GO's watch alerts the dispatcher</td><td>rings (the ring is the motif)</td></tr>
+  <tr><td>Jev, a small AI model</td><td>Said in full the first time, on slide 9</td><td>Jev with no introduction</td></tr>
+  <tr><td>skip a stop</td><td>The dispatcher's decision not to deliver at a stop on this trip</td><td></td></tr>
+  <tr><td>trip · stop · delivery</td><td>One vehicle's outing · one store's place in it · the order handed over there</td><td>route, run, drop</td></tr>
+  <tr><td>store manager</td><td>The role at the outlet</td><td>customer, client</td></tr>
+  <tr><td>06:52</td><td>24-hour depot time on screen</td><td>6:52 AM</td></tr>
+</table>
+
+<h2>Claims to keep honest</h2>
+<table>
+  <tr><th>Claim</th><th>Status</th></tr>
+  <tr><td>Datathon numbers on slide 12</td><td><span class="confirm">confirm</span> The repository disagrees with itself: docs/datathon/TASK-2B-POLICY.md says 74 of 85 served on the peak day, the generated deck and the Figma notes say 77 of 85. The late-risk AUC also differs between documents (0.976, 0.979). The "74% fewer false alarms" and "3% against 8%" figures come from the generated deck. The ML owner gives one number per card, each with its baseline.</td></tr>
+  <tr><td>485 ways a morning goes wrong</td><td>Rows with an id in docs/architecture/EDGE-CASES.md, each with a planned response and a test column. They include technical cases (sync, outages). If asked "handled or written down?", answer: each has its handling rule and where it is enforced.</td></tr>
+  <tr><td>Store one "goes first on the next run"</td><td>True: Skip to next day moves the same order to the next operating day, and it goes first (R-EXE-31).</td></tr>
+  <tr><td>Dock help</td><td>Corrected in v2. Store two is asked only whether the crew may unload store one's goods at its dock to reach its own, then load them back; chilled goods never stay at another store (R-ISS-12). v1 said store two would "hold" them, which was wrong.</td></tr>
+  <tr><td>GO asks the store by itself</td><td>True when the watch finds a stop at risk (R-ISS-15). Depots can turn it off. The answer goes to the dispatcher, who decides.</td></tr>
+  <tr><td>Voice in Sinhala and Tamil</td><td>Built, with read-aloud by our own speech service. Recording was checked with a test microphone; record R3 and R4 on a real phone so the demo proves it.</td></tr>
+  <tr><td>Jev and MCP</td><td>Both built and working. In the pitch they are what makes GO ready for more automation, not features waiting to be built.</td></tr>
+  <tr><td>[N] and [time from R4] on slides 8, 10 and 15</td><td>Fill from the recordings. Never leave a placeholder on a slide; the cold listener read "06:5x" as unfinished.</td></tr>
+</table>
+
+<h2>Open for the team</h2>
+<table>
+  <tr><th>Decision</th><th>Proposal</th></tr>
+  <tr><td>Closing line</td><td>"Ground Operations, decided together." It says the principle and keeps the GO name. Alternatives welcome.</td></tr>
+  <tr><td>The ask</td><td>Both reviewers wanted one, so v2 ends slide 14 with an eight-week pilot at the Kandy depot, measured on four numbers with no money in them. Keep, change or drop.</td></tr>
+  <tr><td>Speakers</td><td>Suggested split: one voice for slides 1-6 and 14-15 (the story), one for 7-13 (the product and the intelligence).</td></tr>
+  <tr><td>Dispatcher persona</td><td>The script avoids a name and a gender for the dispatcher. If we give one, use the Designathon persona so the story is continuous.</td></tr>
+</table>
+
+<h2>Sources behind the structure</h2>
+<p class="src">
+  Arc: Duarte's "what is / what could be" structure (<a href="https://www.duarte.com/blog/ultimate-guide-to-contrast/">Duarte</a>, <a href="https://get.goreact.com/resources/successful-presentation-structure/">GoReact</a>) and the strategic narrative, which opens with the change in the world rather than the product (<a href="https://echai.ventures/gtm/gtm-brand-narrative/what-is-a-strategic-narrative-and-how-is-it-different-from-our-pitch-deck">Echai</a>, <a href="https://nektar.ai/the-strategic-narrative-playbook-lessons-on-how-stories-align-companies-and-win-markets/">Nektar</a>).
+  Person decides: exceptions touching money, safety or a customer are flagged and drafted by the system and decided by a person (<a href="https://numeo.ai/blog/exception-management-in-ai-dispatch-what-humans-should-handle">Numeo</a>, <a href="https://www.expedock.com/blog/human-in-the-loop-bpo-the-smart-way-to-use-ai-in-logistics-operations">Expedock</a>; vendor sources).
+  Ring: closure (<a href="https://shop.smashingmagazine.com/2016/05/improve-your-designs-with-the-principles-of-closure-and-figure-ground-part-2/">Smashing Magazine</a>), open loops (<a href="https://modelthinkers.com/mental-model/zeigarnik-effect">ModelThinkers</a>; the evidence is mixed, so we use it as craft, not science), recurring motifs (<a href="https://ethos3.com/3-steps-using-motifs-presentation-content/">Ethos3</a>).
+  Morph pairing with "!!" names: <a href="https://support.microsoft.com/en-us/office/bc7f48ff-f152-4ee8-9081-d3121788024f">Microsoft</a>.
+</p>
+
+</main>
+</body>
+</html>
