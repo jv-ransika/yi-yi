@@ -20,10 +20,12 @@ import org.junit.jupiter.api.Test;
 /** ML-51: Jev's answer counts only when it is one of the options it was offered. */
 class JevDecisionsTest {
   private HttpServer server;
+  private volatile String sent = "";
 
   private JevDecisions answering(String choice) throws Exception {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/", exchange -> {
+      sent = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
       byte[] body = ("{\"model\":\"typesafe/jev-1.13\",\"answers\":{\"pick\":{\"choice\":\"" + choice
           + "\",\"confidence\":0.9,\"probabilities\":{}}}}").getBytes(StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(200, body.length);
@@ -32,7 +34,7 @@ class JevDecisionsTest {
     });
     server.start();
     AiProperties properties = new AiProperties(false, "groq", "", "key", "", 300, Duration.ofSeconds(5), true,
-        "typesafe/jev-1.13", false);
+        "typesafe/jev-1.13", false, false, 0.5);
     return new JevDecisions(properties, new ObjectMapper(), new Metrics(new SimpleMeterRegistry()), Clock.system(),
         URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/"));
   }
@@ -51,5 +53,15 @@ class JevDecisionsTest {
   @Test
   void anAnswerOutsideTheOptionsIsNoAnswer() throws Exception {
     assertTrue(answering("FIRE").choose("Flat tyre", "Which?", Map.of("BREAKDOWN", "vehicle", "OTHER", "none")).isEmpty());
+  }
+
+  /** R-ML-44: every call asks for a provider that keeps nothing and trains on nothing, with no fallback elsewhere. */
+  @Test
+  void everyCallAsksForAProviderThatKeepsNothing() throws Exception {
+    answering("BREAKDOWN").choose("Flat tyre", "Which?", Map.of("BREAKDOWN", "vehicle", "OTHER", "none"));
+    var provider = new ObjectMapper().readTree(sent).path("provider");
+    assertTrue(provider.path("zdr").asBoolean(), sent);
+    assertEquals("deny", provider.path("data_collection").asText(), sent);
+    assertEquals(false, provider.path("allow_fallbacks").asBoolean(true), sent);
   }
 }

@@ -9,12 +9,15 @@ import type { StoreGateway } from "../../data/gateway.ts";
 import { addDays, dayLabel, longDay } from "../../data/format.ts";
 import { BOOKING_DAYS, needsWarning, outlookChip, suggestDay } from "../../data/outlook.ts";
 import { useT } from "../../i18n.tsx";
+import SharedDayNote from "./SharedDayNote.tsx";
 
 // Issue #224 (R-ML-07): four weeks of delivery days, each with how likely it is
 // to be kept, so "next Friday" can be chosen and a busy day is said before the
 // order is sent. Advice only: any day can still be picked, and the plan made the
 // afternoon before decides. With the outlook down the days stay choosable and
-// the strip says the outlook is missing (rule 9).
+// the strip says the outlook is missing (rule 9). A day that already carries
+// orders of the store's brand, district and temperature shows how many stores
+// are booked, because a trip is likely to go there anyway (R-ORD-17).
 
 /** The dot under each day, one colour per outlook tone. */
 const DOT: Partial<Record<Tone, string>> = {
@@ -23,6 +26,9 @@ const DOT: Partial<Record<Tone, string>> = {
   danger: "bg-go-danger",
   muted: "bg-go-offline",
 };
+
+/** How far either side of the day picked a booking is shown (R-ORD-17, as R-ORD-13's reach). */
+const SHARED_REACH_DAYS = 2;
 
 const KEY: OutlookStatus[] = ["ON_TRACK", "BUSY", "AT_RISK", "CLOSED"];
 
@@ -38,6 +44,9 @@ export default function DateStrip({
   first,
   date,
   shared,
+  temperature,
+  brand,
+  district,
   onPick,
 }: {
   gateway: StoreGateway;
@@ -47,6 +56,10 @@ export default function DateStrip({
   date: string;
   /** Days a trip already serves the district (R-ORD-13), preferred when suggesting. */
   shared: string[];
+  /** The order being built, so bookings are matched on its temperature (R-ORD-17). */
+  temperature: string;
+  brand: string;
+  district: string;
   onPick: (date: string) => void;
 }): React.JSX.Element {
   const t = useT();
@@ -54,6 +67,17 @@ export default function DateStrip({
   const dates = Array.from({ length: BOOKING_DAYS }, (_, i) => addDays(first, i));
   const outlook = useResource(outletId ? (s) => gateway.outlook(outletId, first, last, s) : null, `${outletId}|${first}`);
   const days = outlook.data?.days ?? [];
+  const booked = useResource(
+    outletId ? (s) => gateway.sharedDays(outletId, first, last, temperature, s) : null,
+    `${outletId}|${first}|${temperature}`,
+  );
+  // Only days within two either side of the day picked are marked: further off, a booking says nothing about this order's trip.
+  const near = (d: string) => Math.abs(Date.parse(`${d}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`)) <= SHARED_REACH_DAYS * 86_400_000;
+  const storesOn = (d: string) => {
+    if (!near(d)) return 0;
+    const b = booked.data?.days.find((x) => x.date === d);
+    return b ? b.otherStores + (b.ownOrder ? 1 : 0) : 0;
+  };
   const chosen = days.find((d) => d.date === date);
   const chosenChip = chosen ? outlookChip(chosen.status) : null;
   const suggestion = needsWarning(chosen) ? suggestDay(days, date, shared) : null;
@@ -90,7 +114,7 @@ export default function DateStrip({
       {/* The arrows sit outside the group, so it holds only the days. */}
       <fieldset className="min-w-0">
         <legend className="sr-only">{t("Delivery day")}</legend>
-        <div ref={strip} className="-mx-1 flex snap-x gap-2 overflow-x-auto scroll-smooth px-1 pt-0.5 pb-1.5 [scrollbar-width:none]">
+        <div ref={strip} className="-mx-1 flex snap-x gap-2 overflow-x-auto scroll-smooth px-1 pt-2.5 pb-1.5 [scrollbar-width:none]">
           {dates.map((d, i) => {
             const day = days.find((x) => x.date === d);
             const chip = day ? outlookChip(day.status) : null;
@@ -98,15 +122,18 @@ export default function DateStrip({
             const closed = day?.status === "CLOSED";
             const { weekday, day: number, month } = parts(d);
             const showMonth = i === 0 || number === "1";
+            const stores = storesOn(d);
             return (
               <button
                 key={d}
                 type="button"
                 aria-pressed={selected}
-                aria-label={chip ? `${dayLabel(d)} · ${t(chip.label)}` : dayLabel(d)}
+                aria-label={[dayLabel(d), chip ? t(chip.label) : null, stores > 0 ? t("{n} stores already booked", { n: stores }) : null]
+                  .filter(Boolean)
+                  .join(" · ")}
                 onClick={() => onPick(d)}
                 className={cx(
-                  "flex h-[88px] w-[62px] shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-go-tile border transition-colors",
+                  "relative flex h-[88px] w-[62px] shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-go-tile border transition-colors",
                   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-go-teal",
                   selected
                     ? "border-go-action bg-go-action text-go-on-action shadow-go-float"
@@ -115,6 +142,7 @@ export default function DateStrip({
                       : "border-go-rule bg-go-card text-go-ink hover:border-go-teal",
                 )}
               >
+                {stores > 0 && <StoresBadge n={stores} />}
                 <span className={cx("text-[11px] font-medium uppercase tracking-[0.08em]", selected ? "text-go-on-action/75" : "text-go-secondary")}>
                   {weekday}
                 </span>
@@ -153,7 +181,18 @@ export default function DateStrip({
               </li>
             );
           })}
+          <li className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="relative mt-2 h-2 w-5 [&>span]:right-0.5">
+              <StoresBadge n={2} />
+            </span>
+            {t("Stores already booked for {district}", { district })}
+          </li>
         </ul>
+      )}
+
+      {/* On a day at risk the order may move, so "likely to share a trip" would say the opposite. */}
+      {!(chosen && chosen.status === "AT_RISK") && (
+        <SharedDayNote shared={booked.data ?? null} error={booked.error !== null} date={date} brand={brand} district={district} temperature={temperature} />
       )}
 
       {chosen && needsWarning(chosen) && (
@@ -172,6 +211,18 @@ export default function DateStrip({
         </Notice>
       )}
     </div>
+  );
+}
+
+/** How many stores already have an order that day (R-ORD-17), in the tile's corner. */
+function StoresBadge({ n }: { n: number }): React.JSX.Element {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute -top-2 right-1 grid h-4 min-w-4 place-items-center rounded-full bg-go-mint px-1 text-[10px] leading-none font-semibold text-go-ink tabular-nums ring-2 ring-go-canvas"
+    >
+      {n}
+    </span>
   );
 }
 

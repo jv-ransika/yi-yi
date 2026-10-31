@@ -98,7 +98,7 @@ public class MessagingQuery {
     if (t == null) return new TranscriptView("none", Optional.empty(), Optional.empty(), true);
     if ("pending".equals(t.status())) return new TranscriptView("pending", Optional.empty(), Optional.empty(), true);
     if ("done".equals(t.status()) && t.text().isPresent()) {
-      return new TranscriptView("done", t.text(), t.language(), !t.audioGone());
+      return new TranscriptView("done", t.text(), t.language(), !t.audioGone(), t.unclear());
     }
     return new TranscriptView("none", Optional.empty(), Optional.empty(), !t.audioGone());
   }
@@ -151,7 +151,8 @@ public class MessagingQuery {
               m.resolvedBy().map(by -> resolver(by, names)), m.resolutionNote(), m.redirectedAt(),
               m.redirectReason(), read.map(Optional::isPresent), read.flatMap(r -> r),
               m.voiceNoteId().map(v -> transcript(heard.get(v))), m.sourceIssueId(),
-              m.kind().equals("report") ? m.aboutOutlet() : Optional.empty()));
+              // A report's stop, or the store a store manager wrote from: the dispatcher answers that store.
+              m.aboutOutlet(), m.understood()));
     }
     return new MessagePage(items, page.nextCursor());
   }

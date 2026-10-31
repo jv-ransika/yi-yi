@@ -301,7 +301,7 @@ If no compatible substitute exists, the trip is deferred as a unit and the order
 
 **Owns:** `issues.issues`, `issues.issue_subjects`, `issues.issue_history`, `issues.parameters`, `issues.attachments`, `issues.attachment_content`, `issues.issue_attachments`, `issues.write_offs`, `issues.decision_requests`.
 
-**Live decisions (FF-09, R-ISS-12 to R-ISS-14).** The dispatcher asks one store one question on a live trip (`issue:AskDecision`): `receive_late` ("can someone receive at about HH:MM?", never a mall) or `dock_help` (the next store lets the crew unload a stop's goods at its dock to reach its own, and reload them; the depot loads the last stop first, R-LOD-08). The stop, the store, the units and the expected arrival are read from `ExecutionQuery.runSheet`, never from the caller. The answer is due before the vehicle arrives, 5 to 20 minutes from asking; `DecisionExpiryJob` marks a question with no answer expired, once. The store answers in the app, or the dispatcher records what it said by phone (`issue:AnswerDecision`); an answer after the deadline is kept and marked late. Read at `/api/issues/decisions?date=&depot=`.
+**Live decisions (FF-09, R-ISS-12 to R-ISS-14).** The dispatcher asks one store one question on a live trip (`issue:AskDecision`): `receive_late` ("can someone receive at about HH:MM?", never a mall) or `dock_help` (the next store lets the crew unload a stop's goods at its dock to reach its own, and reload them; the depot loads the last stop first, R-LOD-08). The stop, the store, the units and the expected arrival are read from `ExecutionQuery.runSheet`, never from the caller. The answer is due before the vehicle arrives, 5 to 20 minutes from asking; `DecisionExpiryJob` marks a question with no answer expired, once. The store answers in the app, or the dispatcher records what it said by phone or wrote in the trip's chat (`issue:AnswerDecision` with `byPhone` or `inChat`, the chat's words the reason, R-ML-45); an answer after the deadline is kept and marked late. Read at `/api/issues/decisions?date=&depot=`.
 
 **Photos.** A store manager uploads a photo of a delivery problem for its order (`PUT /api/issues/attachments/{id}?order=&receipt=`, action `issue:AttachPhoto`): id minted on the phone, content addressed by SHA-256, type read from the bytes, 3 MB cap, kept in the database and cleared past P-14. `RaiseIssue` names photos in `attachmentIds`; a photo taken while counting names the receipt and joins its shortage investigation. A link is made whichever arrives first, so an offline phone can send the photo and the report in either order. Read through `/{issueId}/attachments/{attachmentId}/content` by anyone who can see the issue.
 
@@ -361,7 +361,7 @@ If no compatible substitute exists, the trip is deferred as a unit and the order
 | `attention.reminded` | Dispatcher | yes | A critical item nobody acted on, capped by the watch (issue #268) |
 | `vehicle.fault_reported`, `road.disruption_reported` | Dispatcher | yes | The dispatcher decides the vehicle's status |
 | `receipt.disputed` | Dispatcher | yes | The store disagrees with what arrived |
-| `vehicle.status_changed` | Dispatcher | no | Fleet availability changed. Reference does not publish it yet |
+| `vehicle.status_changed` | Dispatcher | yes | Fleet availability changed: a driver's broken or OK, or a dispatcher's day status (R-FLT-06) |
 | `message.posted` | The depot's dispatcher, for every message; the loaders, the driver, or the outlets the message is for (R-NOT-14) | yes | Someone wrote on a trip's thread (issue #136) |
 
 A driver is pushed only trip-level events (R-NOT-08), and whoever caused an event is not told about it (R-NOT-07).
@@ -419,16 +419,17 @@ A driver is pushed only trip-level events (R-NOT-08), and whoever caused an even
 | domain | `DeterministicEstimator`, `ModelGate`, `SupplyPolicy`, `PlannedRoutes`, `CircuitBreaker` |
 | application | `PlanScoringJob`, `ForecastJob`, `ModelHandlers`, `IntelligenceConsumers`, `IntelligenceDataQuery`, `ReferencePayload` |
 | infrastructure | `ModelServingAdapter` (HTTP to the model service, behind a circuit breaker), `JdbcIntelligenceRepository` |
-| web | `/api/ml/models`, `/plans/{id}/predictions`, `/forecast`, `/forecast/overview` (a depot's weeks with calendar and fleet capacity), `/orders/{id}/supply-probability`, `/training/deliveries`, `/training/routes`, `/training/orders` |
+| web | `/api/ml/models`, `/plans/{id}/predictions`, `/forecast`, `/forecast/overview` (a depot's weeks with calendar and fleet capacity), `/orders/{id}/supply-probability`, `/training/deliveries`, `/training/routes`, `/training/orders`, `/training/reference` (the reference tables retraining reads, R-ML-38), `/models/shadow-reviews` (R-ML-40) |
 
-**The model service** (`ml-server/`, ADR-001's Python trigger) serves the trained Datathon models: `delivery_risk` (service minutes and P(late) per stop, scored over whole planned routes, with a no-road-conditions fallback) and `demand_forecast` (weekly total and chilled m³). It only predicts, and refuses to start if a model file differs from its manifest.
+**The model service** (`ml-server/`, ADR-001's Python trigger) serves the trained Datathon models: `delivery_risk` (service minutes and P(late) per stop, scored over whole planned routes, with a no-road-conditions fallback) and `demand_forecast` (weekly total and chilled m³). It only predicts, and refuses to start if a model file in its image differs from its manifest. Beside the image it serves a model store that only the retraining run writes, each entry checked the same way, and a request names the model it means (issue #12, R-ML-39).
 
-**Owns:** `ml.model_versions`, `ml.plan_scorings`, `ml.delivery_predictions`, `ml.demand_forecasts`.
+**Owns:** `ml.model_versions`, `ml.plan_scorings`, `ml.delivery_predictions`, `ml.demand_forecasts`, `ml.shadow_predictions`, `ml.shadow_reviews`, `ml.model_events` (issue #12).
 
 **Invariants.**
 - A model is never called inside an operational transaction (R-ML-01).
 - Every stored prediction names its model or `deterministic` and is written once (R-ML-02).
-- One model per kind is active (R-ML-03).
+- One model per kind is active (R-ML-03), and at most one is the shadow: it scores every published plan apart and never answers (R-ML-40).
+- A model answers only after an administrator activates it; the one it replaces becomes the shadow, and the system may only put that one back, when the nightly review finds it better (R-ML-41, R-ML-42).
 - A model answers only when it is the active one and the service reports exactly it; otherwise the deterministic answer, marked degraded with the reason, and the plan says it was scored without the predictor (R-ML-04).
 - Predictions never change allocation (R-ML-05).
 
@@ -491,7 +492,7 @@ The trip is found through the issue's trip, delivery or order subject (`Executio
 
 **The trip's channel (R-MSG-08, FF-04).** `to: channel` is the dispatcher and the stores still waiting. It opens when the driver starts the trip, after loading (`threads.channel_opened_at`, from the first `delivery.started`). Membership is in `messaging.thread_outlets` per outlet: active from the plan, read only once every order of the outlet on the trip is delivered or failed, never back. A store reads the channel while active, plus what came before; the driver and the loaders do not read it. `message:Redirect` takes a post off the channel with a reason (`messaging.message_redirects`); the message never changes.
 
-**Publishes:** `message.posted` (never the body; an excerpt for the notification; `outletIds` of a channel post are the stores still active).
+**Publishes:** `message.posted` (never the body; an excerpt for the notification; `outletIds` of a channel post are the stores still active; `aboutOutletId`, the store a store manager wrote from) and `message.transcribed` (a voice note written down: its first line only).
 **Consumes:** `plan.published`, `plan.revised` (open or widen each trip's thread, and set its channel's outlets: an outlet moved off the trip goes read only in the channel, the thread itself is never narrowed), `issue.raised`, `issue.resolved` (resolves the report made from the issue), `delivery.started` (the first opens the channel), `delivery.completed`, `delivery.failed` (an order done for the channel).
 **Queries used:** `IssueQuery.issue`, `ExecutionQuery.deliveryRecord`, `ExecutionQuery.deliveryForOrder`, `IdentityQuery` (`driverOn`, `scopeOf`), `PersonQuery`.
 
@@ -594,7 +595,7 @@ Modules connect three ways: a contract query (synchronous, read only), an event 
 | `PlanQuery.previewInterchange` | Loading | Planning |
 | `PredictionQuery` (plan scoring, degradable) | Planning | Intelligence |
 | `PlanQuery.joinsTrip` (room on a trip, advice) | Ordering | Planning |
-| `CatalogueQuery` | store UI, admin | Warehouse |
+| `CatalogueQuery` | store UI, admin; every role for product names (`names`, R-STK-15) | Warehouse |
 | `IssueQuery.issue`, `ExecutionQuery.deliveryRecord`, `deliveryForOrder` | Messaging | Issues, Execution |
 | audit row, written in the same transaction | all | platform |
 
@@ -628,7 +629,9 @@ Modules connect three ways: a contract query (synchronous, read only), an event 
 | `warehouse.discrepancy_found` | Warehouse | Issues |
 | `catalogue.synced` | Warehouse | Ordering |
 | `reference.version_published`, `vehicle.status_changed`, `calendar.overridden` | Reference | Planning, Notification |
-| `message.posted` | Messaging | Notification; Intelligence (a worker's typed report, for Jev in shadow, R-ML-33) |
+| `message.posted` | Messaging | Notification; Intelligence (a worker's typed report, for Jev in shadow, R-ML-33; a driver's or store's own words, for the trip's Next step card, R-ML-35) |
+| `message.understood` | Intelligence | Messaging (what a chat message does, as Jev read it, kept on the message to steer its readers' suggested replies, R-ML-43) |
+| `message.transcribed` | Messaging | Intelligence (what a driver or store said in a voice note, its first line, for the trip's Next step card, R-ML-35) |
 | `demo.driver_notifications_requested` | Demo | Notification |
 | `order.outlook_changed` | Intelligence | Notification |
 | `stop.likely_late` | Intelligence | Notification |

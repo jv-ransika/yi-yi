@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { VehicleCommandKind } from "@shared/domain/referencedata";
 import { newCommand } from "@shared/api/commands";
 import { ApiError } from "@shared/api/problem";
 import { useOnline } from "@shared/api/useResource";
@@ -41,7 +42,9 @@ export type View =
   | { name: "report"; deliveryId: string; failed: FailureReason | null }
   | { name: "stop"; deliveryId: string }
   | { name: "complete" }
-  | { name: "map" };
+  | { name: "map" }
+  /** The driver's own past trips, from the profile sheet. */
+  | { name: "history" };
 
 export type Saved = {
   title: string;
@@ -476,7 +479,11 @@ export function useDriver(userId: string, depot: string | null = null) {
   const reportStatus = async (status: ReportedVehicleStatus) => {
     if (!run.vehicle) return;
     setError(null);
-    const outcome = await act(ExecutionCommandKind.reportVehicleStatus, { vehicleId: run.vehicle.vehicleId, status, note: null });
+    // R-FLT-06: broken or OK marks the vehicle for today in Reference, so Planning moves its trips and the
+    // dispatcher is told; through the queue, so it lands even with no signal at the depot.
+    const outcome = await act(VehicleCommandKind.setDayStatus, {
+      vehicleId: run.vehicle.vehicleId, serviceDate: operatingDate(now), status: status === "available" ? "available" : "unavailable",
+    });
     if (!outcome.ok) return setError(words(outcome));
     setVehicleStatus(status);
     setNotice(outcome.queued ? t("Vehicle status saved on this phone.") : t("Vehicle status sent to dispatch."));
@@ -540,9 +547,10 @@ export function useDriver(userId: string, depot: string | null = null) {
   const detail = view.name === "stop" ? byId(view.deliveryId) : settled ? reported : null;
   // A screen whose stop is no longer on the run falls back to Home.
   const lost = (view.name === "route" && !shown && nextStop(stops) !== null) || (view.name === "report" && !reported) || (view.name === "stop" && !detail);
-  const screen = lost ? "home" : view.name === "route" && !shown ? "complete" : settled ? "stop" : view.name;
+  const screen = view.name === "history" ? "history" : lost ? "home" : view.name === "route" && !shown ? "complete" : settled ? "stop" : view.name;
 
   return {
+    pastTrips: (dates: string[], signal: AbortSignal) => gateway.pastTrips(dates, signal),
     online,
     location,
     fuelPass,

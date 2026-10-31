@@ -4,6 +4,298 @@
 
 ---
 
+## 2026-10-31 - fix: the policy rule row lines up, and a voice note's words sit beside the play button
+
+`fix/policy-editor-and-voice-note-layout` · @Oxshadha
+
+- Admin policy editor: each rule's name and effect now have labels and line up with Actions and Resources below, with Remove at the row's end; the "has a condition" badge moved under the row.
+- Driver voice note player: the words under the heading now sit in the heading's column, so the play button is centred beside them. Notes with a waveform keep the words below it. Layout only, no flow changed.
+- Verified: `npm run typecheck`. Not run: the admin and driver browser suites.
+
+---
+
+## 2026-10-22 - fix: Mark handled resolves the report's Issue too
+
+`dev` · @Oxshadha
+
+- Found in the local check: the problem room's "Mark handled" resolved the chat reports but left the Issues they raised open on the Issues screen. Each report now carries its Issue, and the room resolves both, as the report's own "Mark resolved" already did.
+
+---
+
+## 2026-10-22 - fix: a driver's report shows on Live's timeline at once again
+
+`dev` · @Oxshadha
+
+- Found on preview by @Oxshadha: the notification came but the timeline showed no report sign. The report list refreshed on road, vehicle and delivery changes only (since 5217ee5d), and a report reaches the trip's thread as a message just after the road event. While each read had its own connection (before 04f55f12) the browser's six-connection limit often left the list polling every 2 s, which hid the gap; with one connection per tab it waited for the minute's fallback poll. It now refreshes on messages too: the sign shows 1.2 s after the report, measured live.
+
+---
+
+## 2026-10-22 - fix: a stuck van asks its next store, report chips, and a chat that stays readable
+
+`dev` · @Oxshadha
+
+- Found on preview by @Oxshadha: the problem room filled the dispatcher's chat and could not fold; a blocked road asked nobody while the next store was still in its window; a driver's report had no chips; after a store said No nothing asked the next one.
+- The store the van is heading to is asked on a breakdown or blocked road, and the next one as soon as it says No (R-ML-49, ML-85, ML-86). A report's type gives the chips (ML-87). The room folds by itself while nothing waits on the dispatcher; the desk's chips and recipients scroll in one row (ML-88). Checked at 1392x816: five messages visible with a decision due, against one before.
+
+---
+
+## 2026-10-22 - feat: the Datathon models in planning, and the fixes that made them answer
+
+`dev` · @Oxshadha
+
+- Asked by @Oxshadha: the Task 1 and 2A models were built in but nothing showed them. They were never registered anywhere, and once activated locally neither answered for any date after 2026-06-28: generated calendar days had no paydays and an empty road table broke the features. Fixed both (R-CAL-05, ML-82).
+- Activating a model now takes effect by itself: plans the fallback scored are scored again once, and the forecast runs at the next hour (ML-83).
+- Task 1 on the draft: the plan board shows the late risk before publishing, scored on demand and stored nowhere a notice reads (R-ML-48). Task 2A on Overview: the next two weeks against the fleet's and the refrigerated room, saying whether a model or the estimate made the numbers.
+- Checked locally with both models active: 143 stops scored by the model (late chance 16.6% on average against the estimate's 4.1%), 60 forecast rows by the model, a Saturday draft showing "1 high, on this draft".
+
+---
+
+## 2026-10-22 - fix: a store's older Yes no longer tells the driver it will receive
+
+`dev` · @Oxshadha
+
+- Found on the local check: after OUT005 said No, the chips still offered "Tell the driver OUT005 will receive". The chip took the newest Yes of any store, even with a newer No from that store, and ignored a No written in the chat. Now only a store's newest answer counts, and its words since the Yes count too (ML-81).
+
+---
+
+## 2026-10-22 - feat: chat read in its conversation, written answers heard, drafted replies, private by default
+
+`dev` · @Oxshadha
+
+- Asked by @Oxshadha after the first chat build: a short reply ("no") meant nothing alone, a store's typed answer never reached the problem room, junk replaced the chips, and nothing said what leaves for the AI providers.
+- Found on the way: chat shorter than eight characters ("no", "ok", "after 2") was never read live; the report minimum applied to chat. Fixed (ML-73).
+- Jev now reads each message with the last three masked lines of its chat; on 98 English conversations 85 right alone, 93 with context, no injection obeyed (R-ML-44, P-41). Off-topic lines are skipped for context and for the chips.
+- Every OpenRouter call asks for a provider that keeps nothing and trains on nothing (Jev 1.13 and Qwen both have one). Calls straight to Groq and voice audio to Gemini are outside it; both are said in R-ML-44.
+- A store's written answer to the room's question shows in the room; the dispatcher records it in one tap (`answered_via = chat`, R-ML-45).
+- The same words asked the same way are answered from a cache keyed by a hash of the normalised masked words, prompt, model, scope and what came before; never "similar" words. A hit costs no call and does not count against the cap (R-ML-47).
+- A message no ready reply fits gets a reply drafted by the language model, checked and labelled, one call per message within the cap (R-ML-46). Measured on 12 messages: 10 drafted on OpenRouter, 8 on Groq, injections refused, one draft still named a place the lines did not hold.
+
+---
+
+## 2026-10-22 - feat: no planning before the 16:00 order cutoff
+
+`dev` · @Oxshadha
+
+- A dispatcher could generate tomorrow's plan in the morning, while stores were still ordering for it. Generate is now refused until Ordering has closed the day (by itself at 16:00 the day before, or the dispatcher's Close after it), and the Plan screen says when stores stop ordering instead of offering Generate (R-PLN-49, PLN-53).
+
+---
+
+## 2026-10-23 - feat: the suggested replies follow what each message does, read by Jev
+
+`dev` · @Oxshadha
+
+- Measured on 49 labelled chat lines (`ai-eval/chat.tsv`, English, Sinhala, Tamil, Singlish, spam, abuse, markup, injection) with the real Jev: 42 right; 43 sure enough to steer, 41 of those right. Every miss is Singlish and nearly all are unsure, so an unsure reading falls to the rules' own reading of plain words (`words.ts`); off topic hides the chips only at 0.8 or more (P-40).
+- Checked live with Jev on: a Singlish "can you wait" from the dispatcher gave the store "Yes, we can wait" / "No, deliver tomorrow"; the store's Singlish "no, tomorrow" gave the dispatcher the next delivery day and the skip, with the older "it will receive" chip gone; a script tag was shown as text and read off topic.
+- Fixed on the way: Messaging could not write the reading (missing column grant and policy in the unmerged migration).
+
+- The chips were chosen by who wrote last and the trip's state, blind to the words. Now Jev reads every typed or spoken chat message, the dispatcher's too, into a problem, an act (can you wait, when, yes, no, open now, dock clear, thanks) or off topic; Messaging keeps the reading on the message and each reader's chips answer it from the approved set. Rules remain the fallback; off topic gets nothing (R-ML-43).
+- A reply whose recipient is not open here (a channel not open yet) goes to the dispatcher instead of vanishing.
+
+---
+
+## 2026-10-23 - fix: a live problem is settled in the chat on both sides, checked end to end
+
+`dev` · @Oxshadha
+
+- Found on preview by @Oxshadha: the dispatcher had no reply chips while the problem room was open, the store got "We are ready" (to the driver) in answer to the dispatcher's "can u wait", and a delay notification opened nothing.
+- Now: the store's chips answer the newest word from the dispatcher, back the way it came (Yes / No to "the dispatcher and stores still waiting" when asked there); a closed store or blocked dock keeps its own chips first. The dispatcher always gets an answer to the store's last word ("Thanks, noted", "Tell the driver what the store said"); the trip's own ready replies step aside only while the room asks for a decision. The room's question to a store sits at the top of the store's chat, answered with a tap. A breakdown or blocked-road notification opens the trip's chat. The driver standing at a closed store leads the room before a delay, and an answer to a question asked before the problem decides nothing about it.
+- Checked on the local stack with a dispatcher and a store manager of OUT005 in real browsers: road blocked (ask, Yes, room settled), a free question (No back to the stores' channel, the dispatcher's answer chips), store closed at the door (room asks again, "We are open now" passed to the driver). Not yet: a store's typed reply to a free question changes nothing in the room unless Jev reads it (not built).
+
+---
+
+## 2026-10-23 - feat: the driver's "My trips", the last 7 days of their own trips
+
+`dev` · @Oxshadha
+
+- Drivers had no way to look back at a trip. A "My trips" row in the profile sheet opens their trips of the last 7 days: per trip the stops, what was delivered, skipped or not delivered, the times and the units handed over; a tap shows each store. Read from their own run sheets, online only, and it says so with no signal.
+- A change to the driver UI, which is otherwise frozen: agreed by @jv-ransika on 2026-10-23. The Sinhala and Tamil rows await review.
+
+---
+
+## 2026-10-23 - fix: a store manager's notification stays after it is read
+
+`dev` · @Oxshadha
+
+- The store's notifications drawer and Home card showed unread ones only, so a notification opened or marked read was gone for good. Both now keep every notification, read ones greyed as the Figma's "read rows outlined" says; only the count of new ones leaves out what was read. The test that expected removal is changed with it.
+
+---
+
+## 2026-10-23 - fix: at most an hour more; a message to check is on Needs you; an unclear transcript says so
+
+`dev` · @Oxshadha
+
+- The problem room asks a store to wait 15 min, 30 min or 1 h more, never 2 h.
+- A message waiting to be checked is a card on the dispatcher's "Needs you" with "Check it", reusing the watcher instead of a new notification; the store manager has no watcher, but every reader of a transcript the engine was unsure of sees "heard unclearly, some words may be wrong" (R-ML-37). The label sits in the shared thread component, so the driver's chat shows it too.
+
+---
+
+## 2026-10-23 - feat: a reading in doubt is confirmed by the dispatcher before it counts
+
+`dev` · @Oxshadha
+
+- The speech engine now says whether it heard a voice note clearly. A reading Jev is unsure of, or of words heard over noise, opens nothing: it waits as "Check this" with Jev's guess as one tap; what the dispatcher confirms counts and becomes Jev's label (R-ML-37).
+- The driver is never asked to say it again while driving.
+
+---
+
+## 2026-10-23 - feat: the trip's problem room, one next step from the stores' answers
+
+`dev` · @Oxshadha
+
+- Replaces the decision card's percentages, which @Oxshadha found useless on preview: while a problem the driver reported is open, the top of the trip's chat shows each store's state and one next step (ask, end trip, skip, call, ask the dock, tell the driver), chosen by rules from the stores' Yes/No answers, never a guess (R-ML-36, [PLAN](../../issues/decision-suggestions/PLAN.md) part 3).
+- @jv-ransika left the approach to us: a later store that refuses its dock means the driver moves the skipped goods inside the van at the kerb, recorded in the plan.
+
+---
+
+## 2026-10-23 - feat: Jev reads drivers' and stores' own words onto the trip's Next step card
+
+`dev` · @Oxshadha
+
+- Part 2, PR 2 of decision suggestions ([PLAN](../../issues/decision-suggestions/PLAN.md)): typed messages, voice notes once written down and reports sent as "other" are read by Jev within about five seconds; at or above 0.5 (P-39) the class feeds the card like a report. The card says the chip came from a message read automatically, and the dispatcher can take it off with a reason. R-ML-35.
+- Messaging publishes `message.transcribed` and carries the store a store manager wrote from. `JEV_LIVE` is off by default; production stays off until @jv-ransika agrees to the data processing.
+- Checked with the real model on the local stack: store closed, a Singlish breakdown and plain chat each read right.
+
+---
+
+## 2026-10-23 - feat: one Next step card while a problem is open on a trip
+
+`dev` · @Oxshadha
+
+- The trip's chat offered decisions at the top and ready replies at the bottom, two rows that looked alike. While a problem is open there is now one "Next step" card: decide, then the same card offers the word to send. End trip and Skip already tell the stores, so the card only says they were told ([PLAN](../../issues/decision-suggestions/PLAN.md) part 2).
+- The ready replies and the header's End trip return when the trip is quiet; their "Suggestions: rules only" note is gone until an order is learned.
+
+---
+
+## 2026-10-23 - fix: a breakdown is said on the trip the van is driving, not its next one
+
+`dev` · @Oxshadha
+
+- Also found live: the dispatcher's chat read the run sheets with no depot, which the server answers with the reader's own vehicles, none for a dispatcher. So the real chat never showed End trip, Skip beside a report, the ready replies or any chips; the browser mock ignored the depot and hid it. Fixed, and the mock now answers as the server does (MSG-29).
+- Found while checking the trip outlook live: a vehicle with two trips a day has both threads opened by the plan at once, and a breakdown notice and fault report went to whichever sorted last, often the trip not yet left. They now go to the trip whose channel the driver opened last (EDGE-CASES MSG-28).
+
+---
+
+## 2026-10-23 - feat: one decision outlook per trip, at the top of the trip's chat
+
+`dev` · @Oxshadha
+
+- Part 2, PR 1 of decision suggestions ([PLAN](../../issues/decision-suggestions/PLAN.md)): from a trip's open reports, the chance of End trip, Wait and Carry on, and of each outcome for every store still waiting. A breakdown changes every store's chances at once; a store's own report keeps its own. R-ML-34; the starting numbers are ours (A-46) until @jv-ransika sets them.
+- Messaging gained `TripReportQuery` for it; no words of a report cross. The report's own chips step aside when the outlook covers it, so a decision is offered once.
+- Left: Jev reading free text into the same outlook (PR 2), and logging what the outlook showed and what was taken (PR 3).
+
+---
+
+## 2026-10-23 - fix: decision chips for every live problem in the chat; the trip page gives the stops the width
+
+`dev` · @Oxshadha
+
+- Dispatcher chat: a vehicle fault, blocked road or late report names no stop, so it never got chips. It now asks for them about the next open stop, and "Tell the store" writes to everyone on the trip ([PLAN](../../issues/decision-suggestions/PLAN.md)).
+- Store chat: opened from a notification it had no delivery, so no reply chips. The chips now follow the thread's own trip and the newest message: a delay notice offers later today or the next day, any other word from the dispatcher "Understood".
+- Trip page: the stops table takes the width beside the driver's cards; activity and the update form sit in a row below.
+- Date strip: shared-day counts only within two days of the day picked (R-ORD-17). Driver: the demo drive button keeps a gutter on a phone.
+
+---
+
+## 2026-10-23 - feat: the date strip shows days other stores already booked; New order beside the sync pill
+
+`dev` · @Oxshadha
+
+- Store manager: each day on the Place order strip shows how many stores already have an order of the same brand, district and temperature (own order counted and named), and the day picked says a trip is likely to go there; a quiet day next to a booked one says so. Counts only, advice only, every brand (R-ORD-17, `GET /api/orders/shared-days`). The Sinhala and Tamil strings for it await review.
+- Store Orders: from `lg` New order sits in the top bar just left of the sync pill. The old layout reserved a guessed width for the bar, so the button floated mid-row, and dropped a line under a notice.
+- Admin vehicles: the Fuel Pass change had added Change driver and Fuel Pass to the driver row while the foot row already had them; the driver row now shows only the depot.
+
+---
+
+## 2026-10-23 - fix: a loader takes a free trip by tapping it; the store header lines up
+
+`dev` · @Oxshadha
+
+- Loader: after Hand back the trip stays Loading with no holder, but the sheet still said "Locked to you" and refused every tick, so nobody could load it. Editing now follows the holder: a free trip shows "Take the trip", and tapping an item on a free trip takes it and ticks the item in one go. The mocked browser suite covers the hand-back case.
+- Store manager: "Back to home" after placing an order goes Home, not Orders. On wide screens New order sits at the right edge, and a warning notice stops short of the sync pill instead of running under it.
+
+---
+
+## 2026-10-22 - fix: the plan explanation says left-off orders were left off
+
+`dev` · @Oxshadha
+
+- Checked on the live stack: the model's wording of a plan had every figure right but read the left-off orders as things the plan does ("six deliveries will miss their windows"), and joined two separate facts. The prompt now says what each fact means (R-ML-10); four askings in a row were right. A worded answer is reused only under the same prompt version, so a prompt change takes effect at once.
+
+---
+
+## 2026-10-22 - fix: a vehicle lost between trips is replanned without its trip on the road
+
+`dev` · @Oxshadha
+
+- Found by the end-to-end run from an empty database: when a vehicle was marked not available after its first trip had left, Planning's revision moved that trip too, so publishing it was refused (R-PLN-44) and the dispatcher could never send the update. Now only the trips still at the depot move, no vehicle on the road is offered as a replacement, and no draft is made when nothing can move (FLT-08).
+
+---
+
+## 2026-10-22 - test: today's features end to end on the running stack
+
+`dev` · @Oxshadha
+
+- `live_check.py` (73 of 73: a full day through every role) and a new `features_check.py` on the local stack, with no mocks: the store phone on the trip, a vehicle not available before its trip and the revision that follows to the dock board, a simulated truck recording all its stops, the permission editor's preview, save and restore checked by a real refused and allowed request, and Jev in shadow. Found and fixed: a driver who holds more than one vehicle could mark only one of them (R-FLT-06 now asks who drives this vehicle), and the live check stamped phone positions with the demo clock (DEMO-12). Screenshots taken from the running app.
+
+---
+
+## 2026-10-22 - fix: the driver's vehicle status follows the Figma, and resend is dropped
+
+`dev` · @Oxshadha
+
+- As in Figma "Driver: Home": before the trip the "Available" switch takes the vehicle out of use for today (asks first) and puts it back (R-FLT-06); once the trip has started it gives way to Report problem, whose slides adjust to a stop or the road, and a vehicle problem there is only the report. The Plan screen's decision panel now ends on screen with its actions in view.
+- Item 11 (resend only the missing units) is dropped by @jv-ransika on 2026-10-22: no resend; after damaged goods the store manager places another order.
+
+---
+
+## 2026-10-22 - feat: the permission editor shows who a change affects before it is saved
+
+`dev` · @Oxshadha
+
+- Item 8 of @jv-ransika's plan ([plan](../../issues/permission-editor/PLAN.md)): a Policies tab in the admin console with rule rows, raw JSON, "What changes" (who gains, loses or reaches other records with which action, from the decision point's own evaluator), save as a new default version with a reason, and Restore. Drafts are checked per statement, and a save refuses what the check refuses (R-IAM-42, IAM-PE-01, IAM-PE-02).
+
+---
+
+## 2026-10-22 - feat: the driver marks the vehicle broken or OK, and the plan follows
+
+`dev` · @Oxshadha
+
+- Item 5 of @jv-ransika's plan ([plan](../../issues/vehicle-broken/PLAN.md)). Found that `vehicle.status_changed` was never published, so Planning's revision draft and the dispatcher's alert for a lost vehicle never ran; `vehicle:SetDayStatus` now publishes it once per change. A driver may mark only today's own vehicle broken or OK (R-FLT-06, FLT-06, FLT-07; replaces decision B18, driver policy version added); the driver's switch is now "Vehicle OK" and sends it through the offline queue (owner-approved flow change to the driver UI). The dispatcher is told at once (routing version 19) and the Plan screen says why the new draft exists (`PlanView.revisionReason`).
+
+---
+
+## 2026-10-22 - feat: demo trucks record their own stops
+
+`dev` · @Oxshadha
+
+- Item 15 of @jv-ransika's plan ([plan](../../issues/demo-stops/PLAN.md)): a simulated truck records each stop's arrival and delivery (every unit, "demo vehicle") through the real commands as its driver; the store still confirms receipt, and no proof is taken. The demo driver account's truck is left to a person. The control room says "Stops recorded: 3 of 8". R-DEMO-04 rewritten, DEMO-14.
+
+---
+
+## 2026-10-21 - feat: products read by the warehouse's name
+
+`dev` · @Oxshadha
+
+- The warehouse API now names products; the catalogue sync keeps `name` and `category`, and every screen that lists a product shows the name, still "(inferred)" (R-STK-15, CAT-07, CAT-08, [plan](../../issues/product-names/PLAN.md)). One names read for all roles, kept on the device for offline labels; the loader's and driver's policies gain `warehouse:ReadCatalogue` (new default versions). The store searches by name. Not checked against the live warehouse yet: no API key locally, so built to its published shape.
+
+---
+
+## 2026-10-21 - feat: each stop's store manager and phone on the trip, no Call button
+
+`dev` · @Oxshadha
+
+- Item 9 of @jv-ransika's plan ([plan](../../issues/store-phone/PLAN.md)): the Live trip page shows each stop's store manager and phone as text, read for the whole trip in one request (`GET /api/outlets/contacts?ids=`, R-IAM-41), and the deferred order's Call link is gone. One outlet outside the dispatcher's depots refuses the whole read with the same 404.
+
+---
+
+## 2026-10-21 - fix: the AI parts checked end to end on the local stack
+
+`dev` · @Oxshadha
+
+- A real day driven through the commands (`scripts/live-check`, now reporting at the depot first, R-LOD-13) on a separate local database, with Jev and the watcher on: Jev answered 5 of 5 typed driver reports from masked text, the "other" report was not queued, and the watcher's first review was used in 0.5 s on `qwen/qwen3.8-27b`. Found on screen: Live measured a window from the device until its next tick when the demo clock's offset came after the first paint ("1989 min left" for 156), fixed (DEMO-13); the AI health screen now tells issue and trip-report agreement apart. `seed-delivery-day` no longer gives the demo driver vehicles, so a local day needs `iam:AssignDriver` first.
+
+---
+
 ## 2026-10-21 - fix: the AI parts measured against the real models, and two faults fixed
 
 `dev` · @Oxshadha

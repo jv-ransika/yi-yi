@@ -35,6 +35,7 @@ export default function Orders({
   onOpen,
   onPlace,
   onRetry,
+  clearTopBar = true,
 }: {
   orders: OrderView[];
   loading: boolean;
@@ -43,6 +44,7 @@ export default function Orders({
   onPlace: () => void;
   /** Read the orders again after a failure. */
   onRetry?: () => void;
+  clearTopBar?: boolean;
 }): React.JSX.Element {
   const { units } = useCounts();
   const t = useT();
@@ -54,12 +56,13 @@ export default function Orders({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* From lg the sync pill and the bell sit top right over the page (TopBar); keep New order clear of them. */}
-      <div className="flex items-end gap-3 lg:mr-[260px]">
+      {/* From lg the top bar (New order, the sync pill and the bell) sits top right over the page; when this heading is the first row it stops short of the bar. */}
+      <div className={`flex items-end gap-3 ${clearTopBar ? "lg:mr-[calc(var(--store-topbar-w,240px)+12px)]" : ""}`}>
         <h1 className="flex-1 text-[32px] leading-tight font-medium text-black">{t("Orders")}</h1>
-        <button type="button" onClick={onPlace} className="min-h-12 rounded-[22px] bg-go-mint px-5 text-[15px] font-medium text-black">
-          {t("+ New order")}
-        </button>
+        {/* From lg it is in the top bar instead, beside the sync pill. */}
+        <span className="lg:hidden">
+          <NewOrderButton onPlace={onPlace} />
+        </span>
       </div>
 
       <div role="group" aria-label={t("Show")} className="flex gap-1 rounded-full bg-white p-1 lg:w-fit">
@@ -112,5 +115,14 @@ export default function Orders({
         </section>
       ))}
     </div>
+  );
+}
+
+export function NewOrderButton({ onPlace }: { onPlace: () => void }): React.JSX.Element {
+  const t = useT();
+  return (
+    <button type="button" onClick={onPlace} className="min-h-12 shrink-0 rounded-[22px] bg-go-mint px-5 text-[15px] font-medium text-black">
+      {t("+ New order")}
+    </button>
   );
 }

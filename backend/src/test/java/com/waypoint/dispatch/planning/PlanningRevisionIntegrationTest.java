@@ -3,6 +3,7 @@ package com.waypoint.dispatch.planning;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -186,6 +187,33 @@ class PlanningRevisionIntegrationTest extends PlanningIntegrationSupport {
         "FLT-01: nothing left on the lost vehicle");
     assertNotEquals(lost, tripById(revision, tripId).get("vehicleId").asText(), "the trip moved whole and kept its id");
     assertEquals("PUBLISHED", plan(original).get("status").asText(), "only a dispatcher publishes it");
+    // The Plan screen says why the draft is there (R-FLT-06).
+    assertTrue(view.path("revisionReason").asText().contains(lost), view.path("revisionReason").toString());
+  }
+
+  @Test
+  void aVehicleLostWhoseTripHasAlreadyLeftDraftsNothingThatCouldNotBePublished() throws Exception {
+    // Found on the live stack, 2026-10-22: the revision moved the trip on the road too, so it could never be sent.
+    demand("ambient");
+    UUID original = publishedPlan();
+    JsonNode trip = plan(original).get("trips").get(0);
+    String lost = trip.get("vehicleId").asText();
+    UUID tripId = UUID.fromString(trip.get("tripId").asText());
+    deliver("planning.on-trip-released", new com.waypoint.dispatch.loading.contract.LoadingEvents.TripReleased(
+        tripId, original, 1, lost, depot, serviceDate, List.of()));
+
+    deliver("planning.on-vehicle-status-changed", new VehicleStatusChanged(lost, serviceDate, "unavailable", Optional.of("broken down")));
+
+    assertNull(openDraft(), "the trip on the road stays; there is nothing to move, so no draft is waiting");
+    assertEquals("PUBLISHED", plan(original).get("status").asText());
+
+    // The vehicle is out of use now, but its trip left before: a revision can still be sent (FLT-08).
+    database.asModule(ModuleRole.REF, null, () -> database.update(
+        "INSERT INTO ref.vehicle_day_status (vehicle_id, service_date, status, reason) VALUES (?, ?, 'unavailable', 'broken down')",
+        lost, java.sql.Date.valueOf(serviceDate)));
+    UUID revision = UUID.fromString(
+        mapper.readTree(send(dispatcher, revise(original, 2L, "a second look"), 200)).get("result").get("planId").asText());
+    send(dispatcher, publish(revision, 1L), 200);
   }
 
   @Test

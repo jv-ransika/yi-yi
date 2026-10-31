@@ -53,7 +53,7 @@ flock -n 9 || exit 0
 backups="$(dirname "$APP_DIR")/backups/$environment"
 mkdir -p "$backups"
 
-# What a ready spare is marked with: the init image that built it and its day.
+# What a ready spare is marked with: the init image and seed files that built it, and its day.
 # The image, not the git commit: during a deploy the checkout moves before the
 # image is rebuilt, and a spare built then by the old image must not count.
 stamp() {
@@ -62,7 +62,11 @@ stamp() {
   local image
   image="$(docker image inspect -f '{{.Id}}' "$(basename "$APP_DIR")-init" 2>/dev/null || echo none)"
   image="${image#sha256:}"
-  echo "ready ${image:0:16} $(TZ=Asia/Colombo date +%F)"
+  # The seed files are mounted from this checkout, not built into the image, so
+  # they are part of the mark too: a changed account list makes a new spare.
+  local seeds
+  seeds="$(cat scripts/demo-accounts.csv scripts/seed-demo.sql scripts/seed-demo-accounts.sh scripts/compose-init.sh 2>/dev/null | sha256sum | cut -c1-8)"
+  echo "ready ${image:0:16}.${seeds} $(TZ=Asia/Colombo date +%F)"
 }
 spare_ready() {
   [[ "$(sql postgres -c "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '$SPARE'")" == "$(stamp)" ]]
@@ -81,7 +85,15 @@ drop_db() {
 build() {
   [[ "$1" == "$DEMO" || "$1" == "$SPARE" ]] || return 1
   sql postgres -c "CREATE DATABASE $1 OWNER waypoint" || return 1
-  DB_NAME="$1" "${compose[@]}" run --rm -T init || return 1
+  # Demo accounts are made with the demo sign-in password when there is one, so
+  # every account in the demo, the ones only the demo has included, opens with it.
+  local password
+  password="$(env_value DEMO_SIGN_IN_PASSWORD)"
+  if [[ -n "$password" ]]; then
+    DB_NAME="$1" SEED_PASSWORD="$password" "${compose[@]}" run --rm -T init || return 1
+  else
+    DB_NAME="$1" "${compose[@]}" run --rm -T init || return 1
+  fi
   DB_NAME="$1" "${compose[@]}" run --rm --no-deps -T seed || return 1
   sql "$1" -c "UPDATE demo.settings SET enabled = true, clock_offset_seconds = 0, row_version = row_version + 1, updated_at = now()" || return 1
 }

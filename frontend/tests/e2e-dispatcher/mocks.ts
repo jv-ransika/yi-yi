@@ -291,6 +291,15 @@ export async function serve(page: Page, start: Partial<Desk> = {}): Promise<Desk
       const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
       return route.fulfill(json(url.searchParams.get("date") === nextRun(today) ? desk.orders : []));
     }
+    // R-IAM-41: each outlet's store manager, by outlet; OUT012 has none, OUT010 has no phone on the profile.
+    const manager = (outletId: string) =>
+      outletId === "OUT012" ? [] : [{ name: `Manager ${outletId}`, phone: outletId === "OUT010" ? null : `077 555 ${outletId.slice(-4)}` }];
+    if (pathname === "/api/outlets/contacts") {
+      const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean);
+      return route.fulfill(json(Object.fromEntries(ids.map((id) => [id, manager(id)]))));
+    }
+    const contactOf = /^\/api\/outlets\/([^/]+)\/contacts$/.exec(pathname);
+    if (contactOf) return route.fulfill(json(manager(contactOf[1]!)));
     if (pathname === "/api/orders/by-id") {
       const ids = new Set((url.searchParams.get("ids") ?? "").split(","));
       return route.fulfill(json([...desk.orders, ...(desk.elsewhere ?? [])].filter((o) => ids.has(o.orderId))));
@@ -341,7 +350,8 @@ export async function serve(page: Page, start: Partial<Desk> = {}): Promise<Desk
       return route.fulfill(json({ date: pathname.split("/").pop(), operating: true, nextOperatingDay: "2027-03-02", known: true, day: {} }));
     }
     if (/^\/api\/ml\/plans\/[^/]+\/predictions$/.test(pathname)) return route.fulfill(desk.predictions ? json(desk.predictions) : problem(404, "NOT_FOUND", "Not scored"));
-    if (pathname === "/api/execution/run-sheets") return route.fulfill(json(desk.sheets));
+    // As the server: with no depot it answers with the reader's own vehicles, which a dispatcher has none of.
+    if (pathname === "/api/execution/run-sheets") return route.fulfill(json(url.searchParams.get("depot") ? desk.sheets : []));
     if (pathname === "/api/execution/positions") return route.fulfill(json(desk.positions ?? []));
     // The push (R-EXE-23): one event per connection; the browser reconnects and hears the next.
     if (pathname === "/api/execution/positions/stream") {

@@ -1,23 +1,28 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { request } from "@shared/api/client";
 import { useResource } from "@shared/api/useResource";
 import type { DecisionView, MessageView, ReplyRankingView, RunSheetView, ThreadView } from "@shared/domain/types";
-import { rankReplies, replies } from "@shared/messaging/templates";
+import { dispatcherAnswers, dispatcherChips, newestToAnswer, rankReplies, refusedSinceYes, replies } from "@shared/messaging/templates";
 import { rankingNote } from "./data/replyRanking.ts";
 import { TripThread, useOverlay } from "@shared/ui";
 import { dayLabel } from "@shared/wording";
 import { useDispatcherInbox, type OpenThread } from "./inbox.tsx";
+import { DRAFTS } from "./data/replyDrafts.ts";
 import { EndTripButton, SkipStopButton, skippable } from "./screens/LiveTripSkip.tsx";
 import ReportSuggestions from "./screens/ReportSuggestions.tsx";
 import TellEachStore from "./screens/TellEachStore.tsx";
+import TripOutlookChips, { problemOpen, useTripOutlook } from "./screens/TripOutlookChips.tsx";
 
 // A trip's thread in a sheet on the right (issue #136), over whichever screen
 // opened it: a warning sign on the timeline, the trip page, a notification.
 // The dispatcher reads every message on it and writes to anyone on the trip, and
 // decides here (R-EXE-31): Skip store beside a report about a stop still open,
 // End trip in the header. Stores and the driver see only the outcome.
+
+/** Reports about the vehicle rather than one stop (messaging report types). */
+const VEHICLE_REPORTS = new Set(["vehicle_fault", "road_disruption", "late"]);
 
 export default function ThreadSheet({ online }: { online: boolean }): React.JSX.Element | null {
   const ctx = useDispatcherInbox();
@@ -48,9 +53,15 @@ function ThreadSheetPanel({
   const head = thread.data && thread.data.threadId === open.threadId ? thread.data : null;
   // FF-08: the trip's state, for the ready replies: its run sheet and the stores' answers today.
   const date = head?.serviceDate ?? null;
+  const depot = head?.depotCode ?? null;
+  // The depot's run sheets: without a depot the server answers with the reader's own vehicles, which
+  // for a dispatcher is none, and the chat would offer no decision at all.
   const sheets = useResource(
-    date ? (signal: AbortSignal) => request<RunSheetView[]>(`/api/execution/run-sheets?date=${encodeURIComponent(date)}`, { signal }) : null,
-    `thread-sheets|${date}`,
+    date && depot
+      ? (signal: AbortSignal) =>
+          request<RunSheetView[]>(`/api/execution/run-sheets?date=${encodeURIComponent(date)}&depot=${encodeURIComponent(depot)}`, { signal })
+      : null,
+    `thread-sheets|${depot}|${date}`,
     30_000,
     // A stop skipped here or recorded on the road changes the buttons at once (F-07b).
     head ? { depots: [head.depotCode], topics: ["delivery", "trip"] } : undefined,
@@ -83,19 +94,33 @@ function ThreadSheetPanel({
   const openStops = tripStops.filter(skippable);
   // The decision beside a report is about the stop it names, while that stop is still open.
   // Issue #269: the decisions most likely here as chips, then Skip itself for a stop still open.
+  // A report about the vehicle (a breakdown, a blocked road, running late) names no stop: its chips are
+  // asked about the next stop still open, and its word goes to everyone on the trip.
+  const nextOpen = [...openStops].sort((x, y) => x.sequence - y.sequence)[0];
+  // R-ML-34: the trip's outlook at the top covers its reports; a report's own chips stay only as the
+  // fallback while the outlook cannot be read, so the same decision is never offered twice.
+  const [extra, setExtra] = useState<number | null>(null);
+  const outlook = useTripOutlook(head?.subjectId ?? null, head?.depotCode ?? null, online, extra);
+  const covered = new Set((outlook?.signals ?? []).map((x) => x.messageId));
+  // While the problem room asks for a decision it is the one place to decide or send: the header's
+  // End trip and Tell each store, and the ready replies, step aside until it waits or is done.
+  const problem = problemOpen(outlook);
   const reportActions = (m: MessageView) => {
-    const about = tripStops.find((s) => s.outletId === m.aboutOutletId);
+    const named = tripStops.find((s) => s.outletId === m.aboutOutletId);
+    const wholeTrip = !named && m.reportType !== null && VEHICLE_REPORTS.has(m.reportType);
+    const about = named ?? (wholeTrip ? nextOpen : undefined);
     const stop = openStops.find((s) => s.outletId === m.aboutOutletId);
     if (!about) return null;
     return (
       <div className="flex flex-col gap-2">
-        {m.reportType && m.resolvedAt === null && (
+        {m.reportType && m.resolvedAt === null && !covered.has(m.messageId) && (
           <ReportSuggestions
             stop={about}
             report={m.reportType}
             openStops={openStops}
             vehicleId={head?.vehicleId ?? null}
             online={online}
+            wholeTrip={wholeTrip}
             onDraft={(draft) => inbox?.openThread({ threadId: open.threadId, draft })}
           />
         )}
@@ -129,11 +154,24 @@ function ThreadSheetPanel({
             Close
           </button>
         </header>
-        {head && openStops.length > 0 && (
+        {head && openStops.length > 0 && !problem && (
           <div className="flex flex-col gap-2">
             <EndTripButton tripId={head.subjectId} open={openStops} online={online} inline />
             {date && <TellEachStore threadId={open.threadId} stops={tripStops} serviceDate={date} online={online} />}
           </div>
+        )}
+        {head && (
+          <TripOutlookChips
+            view={outlook}
+            threadId={open.threadId}
+            tripId={head.subjectId}
+            vehicleId={head.vehicleId}
+            stops={tripStops}
+            decisions={(answers.data ?? []).filter((d) => d.tripId === head.subjectId)}
+            online={online}
+            onExtra={setExtra}
+            onShow={(messageId) => inbox?.openThread({ threadId: open.threadId, messageId })}
+          />
         )}
         {!online && (
           <p role="status" className="rounded-go-card-s bg-go-warning-tint px-3.5 py-2.5 text-sm text-go-warning-text">
@@ -148,7 +186,18 @@ function ThreadSheetPanel({
           variant="desk"
           focusMessageId={open.messageId ?? null}
           {...(open.draft ? { draft: open.draft } : {})}
-          {...(ordered.length > 0 ? { replies: ordered, repliesNote: rankingNote(ranking.data ?? null, ranking.error != null) } : {})}
+          // The answer to the newest word from a store is always offered: a store that writes "we are open
+          // now" while the room decides still needs telling the driver. The replies for the trip's state
+          // step aside while the room asks for a decision.
+          replies={(_thread: unknown, messages: MessageView[]) => {
+            // The answer to the newest word first, then the trip's own replies; at most four, none twice.
+            const last = newestToAnswer(messages);
+            const decided = (answers.data ?? []).filter((d) => d.tripId === head?.subjectId);
+            return dispatcherChips(dispatcherAnswers(last, ordered), problem ? [] : ordered, last?.aboutOutletId ?? null,
+              refusedSinceYes(messages, decided));
+          }}
+          {...(!problem ? { repliesNote: rankingNote(ranking.data ?? null, ranking.error != null) } : {})}
+          draftReply={DRAFTS}
           reportActions={reportActions}
         />
       </section>

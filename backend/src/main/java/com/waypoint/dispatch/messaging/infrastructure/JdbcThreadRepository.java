@@ -83,7 +83,9 @@ public class JdbcThreadRepository {
       /** The issue a report was made from (R-MSG-05); empty for a person's own message. */
       Optional<UUID> sourceIssueId,
       /** The stop a report is about, when known. */
-      Optional<String> aboutOutlet) {}
+      Optional<String> aboutOutlet,
+      /** What the message does, as Jev read it sure enough to steer the replies (R-ML-43); empty otherwise. */
+      Optional<String> understood) {}
 
   /** A stored voice note, without its bytes. */
   public record VoiceNote(
@@ -135,12 +137,14 @@ public class JdbcThreadRepository {
 
   /** The trip a vehicle is on that day: the latest opened, for a report that names only the vehicle. */
   public Optional<Thread> tripOfVehicle(String vehicleId, LocalDate serviceDate) {
+    // A vehicle with two trips a day has both threads opened by the plan at once: the one on the road
+    // is the trip whose channel the driver opened last; only before any has started is it the newest.
     return Optional.ofNullable(
             database.queryOne(
                 """
                 SELECT * FROM messaging.threads
                  WHERE subject_type = 'trip' AND vehicle_id = ? AND service_date = ?
-                 ORDER BY opened_at DESC, thread_id DESC LIMIT 1
+                 ORDER BY channel_opened_at DESC NULLS LAST, opened_at DESC, thread_id DESC LIMIT 1
                 """,
                 vehicleId, serviceDate))
         .map(JdbcThreadRepository::thread);
@@ -468,6 +472,31 @@ public class JdbcThreadRepository {
         depotCode, serviceDate);
   }
 
+  /** The post a voice note belongs to, with its thread, for saying it was written down (R-ML-35). */
+  public Optional<Map<String, Object>> postOfVoice(UUID voiceNoteId) {
+    return Optional.ofNullable(database.queryOne(
+        """
+        SELECT m.message_id, m.thread_id, m.author_role, m.kind, m.report_type, m.about_outlet,
+               t.subject_type, t.subject_id, t.depot_code
+          FROM messaging.messages m
+          JOIN messaging.threads t ON t.thread_id = m.thread_id
+         WHERE m.voice_note_id = ?
+        """,
+        voiceNoteId));
+  }
+
+  /** One thread's reports not yet resolved, oldest first (decision suggestions part 2). */
+  public List<Map<String, Object>> openReports(UUID threadId) {
+    return database.query(
+        """
+        SELECT message_id, report_type, author_role, about_outlet, created_at, source_issue_id
+          FROM messaging.messages
+         WHERE thread_id = ? AND kind = 'report' AND resolved_at IS NULL AND report_type IS NOT NULL
+         ORDER BY created_at, message_id
+        """,
+        threadId);
+  }
+
   private static Thread thread(Map<String, Object> row) {
     return new Thread(
         (UUID) row.get("thread_id"),
@@ -501,7 +530,13 @@ public class JdbcThreadRepository {
         Optional.ofNullable((Timestamp) row.get("redirected_at")).map(Timestamp::toInstant),
         Optional.ofNullable((String) row.get("redirect_reason")),
         Optional.ofNullable((UUID) row.get("source_issue_id")),
-        Optional.ofNullable((String) row.get("about_outlet")));
+        Optional.ofNullable((String) row.get("about_outlet")),
+        Boolean.TRUE.equals(row.get("understood_sure")) ? Optional.ofNullable((String) row.get("understood_act")) : Optional.empty());
+  }
+
+  /** R-ML-43: what a message was read as; applying it twice is harmless. */
+  public void understood(UUID messageId, String act, boolean sure) {
+    database.update("UPDATE messaging.messages SET understood_act = ?, understood_sure = ? WHERE message_id = ?", act, sure, messageId);
   }
 
   // ---- reports ------------------------------------------------------------------

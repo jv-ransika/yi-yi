@@ -6,7 +6,7 @@ import PageHeader from "../PageHeader.tsx";
 import { byUrgency, punctuality, vehicleDay } from "../data/live.ts";
 import { closedOnTheirOwn, depotSummaries, filterRuns, goodsToday, needCards, runsOf, summaryText, type RunFilter } from "../data/liveDesk.ts";
 import { dayLabel } from "../data/scope.ts";
-import { useIssues, useLive, usePositions, useReports } from "../data/useDay.ts";
+import { useIssues, useMessageChecks, useLive, usePositions, useReports } from "../data/useDay.ts";
 import { useDispatcherInbox } from "../inbox.tsx";
 import { tripOf, useOpenTripThread } from "../data/threads.ts";
 import DayPicker from "./DayTools.tsx";
@@ -17,7 +17,7 @@ import { Toggle } from "./LiveParts.tsx";
 import LiveTimeline, { RoadCard } from "./LiveTimeline.tsx";
 import LiveTrip from "./LiveTrip.tsx";
 import Refusal from "./Refusal.tsx";
-import { businessNow } from "@shared/wording";
+import { businessNow, onClockOffset } from "@shared/wording";
 
 // Figma "05 Live" (189:20983 needs you, 189:21127 timeline, 189:21358 map,
 // 189:21943 trip). Run sheets are read every 2 seconds while the tab is
@@ -51,6 +51,7 @@ export default function Live({
   const live = useLive(depots, date);
   const positions = usePositions(depots, date);
   const issues = useIssues(depots);
+  const checks = useMessageChecks(depots, date);
   const reports = useReports(depots, date);
   const inbox = useDispatcherInbox();
   const openTripThread = useOpenTripThread();
@@ -66,7 +67,12 @@ export default function Live({
   // "At risk" compares a window with the time now, so the time moves.
   useEffect(() => {
     const timer = window.setInterval(() => setNow(businessNow()), 30_000);
-    return () => window.clearInterval(timer);
+    // The demo clock's offset arrives after the first paint: until it does, a window would be measured from the device's time.
+    const unsubscribe = onClockOffset(() => setNow(businessNow()));
+    return () => {
+      window.clearInterval(timer);
+      unsubscribe();
+    };
   }, []);
 
   const sheets = live.data?.sheets ?? [];
@@ -79,7 +85,7 @@ export default function Live({
   const inDepot = filterRuns(runs, depot, "all").runs;
   const shown = filterRuns(runs, depot, filter);
   const depotIssues = (issues.data ?? []).filter((i) => depot === "all" || i.depotCode === depot);
-  const cards = needCards(inDepot, depotIssues, date, now);
+  const cards = needCards(inDepot, depotIssues, date, now, checks.data ?? []);
   const goods = goodsToday(depotIssues, date);
   const onTheRoad = inDepot.filter((r) => r.day.state !== "finished").length;
   const atDock = (live.data?.dock ?? []).filter((t) => t.releasedAt === null && (depot === "all" || depotOf[t.vehicleId] === depot)).length;

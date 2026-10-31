@@ -26,7 +26,7 @@ export default function SimulationsPanel({ run, busy }: { run: (label: string, a
     <section className={`${card} flex flex-col gap-4 p-5`}>
       <h2 className="text-lg font-medium text-go-ink">Simulated vehicles</h2>
       <p className="text-sm text-go-secondary">
-        Drives released trips of the demo day from the depot through each stop, one point every 2 seconds, on straight legs. Watch them on the dispatcher&rsquo;s live map and the store&rsquo;s Track screen. The driver still records each delivery.
+        Drives released trips of the demo day from the depot through each stop, one point every 2 seconds, on straight legs. Watch them on the dispatcher&rsquo;s live map and the store&rsquo;s Track screen. Each truck records its stops' arrival and delivery as its driver; the store still confirms the receipt, and a truck the demo driver account holds is left to a person.
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <button type="button" className={primary} disabled={busy} onClick={() => act("Start every released trip", (r) => startSimulation(r))}>
@@ -55,7 +55,7 @@ export default function SimulationsPanel({ run, busy }: { run: (label: string, a
             <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-go-ink">
               <span className="w-20 font-medium">{s.vehicle_id}</span>
               <Badge tone={TONE[s.status]}>{s.status}</Badge>
-              <span className="tabular-nums text-go-secondary">point {s.tick} · {s.waypoints - 1} stops · started {clock(s.started_at)}</span>
+              <span className="tabular-nums text-go-secondary">point {s.tick} · {s.stops_total == null ? `${s.waypoints - 1} stops` : `Stops recorded: ${s.stops_recorded ?? 0} of ${s.stops_total}`} · started {clock(s.started_at)}</span>
               {s.failure && <span className="text-[#a3261a]">{s.failure}</span>}
               {s.status === "running" && <button type="button" className={secondary} disabled={busy} onClick={() => act(`Pause ${s.vehicle_id}`, (r) => controlSimulations(r, "pause", s.id))}>Pause</button>}
               {s.status === "paused" && <button type="button" className={secondary} disabled={busy} onClick={() => act(`Resume ${s.vehicle_id}`, (r) => controlSimulations(r, "resume", s.id))}>Resume</button>}

@@ -6,7 +6,7 @@ import { useTripThread } from "@shared/messaging/useThread";
 import { SecondaryButton, Sheet, SkeletonRows, TripThread } from "@shared/ui";
 import { useT } from "../i18n.tsx";
 import type { DeliveryRecordView } from "@shared/domain/types";
-import { storeReplies } from "@shared/messaging/templates";
+import { newestToAnswer, storeReplies } from "@shared/messaging/templates";
 
 // A trip's thread for the store (issue #136): what the dispatcher or the driver
 // wrote to this store or to everyone on the trip, and the store's own replies
@@ -23,15 +23,18 @@ export default function TripMessages({
   online,
   onQueued,
   onClose,
-  delivery = null,
+  deliveries = [],
+  questions,
 }: {
   accountId: string;
   open: OpenThread;
   online: boolean;
   onQueued: () => void;
   onClose: () => void;
-  /** The store's delivery on this trip, for its ready replies; null when not known. */
-  delivery?: DeliveryRecordView | null;
+  /** The store's deliveries, so the ready replies follow the delivery on this thread's trip, however it was opened. */
+  deliveries?: DeliveryRecordView[];
+  /** The dispatcher's open questions to this store (FF-09), answered here with a tap as on Home. */
+  questions?: React.ReactNode;
 }): React.JSX.Element {
   const t = useT();
   const byTrip = useTripThread("tripId" in open ? open.tripId : null, accountId);
@@ -49,6 +52,8 @@ export default function TripMessages({
           {t("Close")}
         </button>
       </header>
+      {/* The dispatcher's question to this store sits above the messages, answered with one tap. */}
+      {questions}
       <div className="flex h-[62dvh] min-h-0 flex-col">
         {threadId ? (
           <TripThread
@@ -59,7 +64,13 @@ export default function TripMessages({
             keepsOffline
             accountId={accountId}
             tr={t}
-            replies={storeReplies(delivery, (english) => t(english))}
+            replies={(thread, messages) =>
+              storeReplies(
+                deliveries.find((d) => d.tripId === thread.subjectId) ?? null,
+                (english) => t(english),
+                newestToAnswer(messages),
+              )
+            }
           />
         ) : byTrip.loading ? (
           <SkeletonRows label={t("Loading messages…")} />

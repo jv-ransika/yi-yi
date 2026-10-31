@@ -104,3 +104,65 @@ test("a store the driver found closed is offered to say it is open now, to the d
   await sheet.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => sent.find((c) => c.kind === "message:Post")?.payload).toMatchObject({ to: "dispatch", templateId: "storereply.open_now" });
 });
+
+test("a delay notice opened from a notification offers the store's answers: later today, or the next day", async ({ page }) => {
+  const delayed = tripThread("trip-1", "VEH043", ["OUT085"], "store_manager", [
+    said("m1", new Date(Date.now() - 5 * 60_000).toISOString(), { body: "VEH043 is delayed: breakdown", audience: "all" }),
+  ]);
+  const { sent } = await mockStore(page, { threads: [delayed] });
+  const { DELIVERY } = await import("./mocks.ts");
+  await page.route("**/api/execution/deliveries**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ ...DELIVERY, outcome: "PENDING", startedAt: new Date().toISOString() }]) }));
+  const n = {
+    notificationId: "n-delay", eventType: "message.posted", title: "Dispatcher · VEH043", body: "VEH043 is delayed: breakdown",
+    subjectType: "thread", subjectId: "thread-trip-1", createdAt: new Date().toISOString(), readAt: null,
+  };
+  await page.route("**/api/notifications**", (route) => {
+    const { pathname } = new URL(route.request().url());
+    const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    if (pathname.endsWith("/stream")) return route.fulfill({ status: 200, contentType: "text/event-stream", body: 'event: unread\ndata: {"count":1}\n\n' });
+    if (pathname.endsWith("/unread-count")) return route.fulfill(json({ count: 1 }));
+    return route.fulfill(json({ items: [n], nextCursor: null }));
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Notifications/ }).first().click();
+  await page.getByRole("dialog", { name: "Notifications" }).getByRole("button", { name: /is delayed: breakdown/ }).click();
+
+  // Opened by the thread, not the delivery's row: the chips still follow this trip's delivery and the newest word.
+  const sheet = page.getByRole("dialog", { name: "Trip messages" });
+  const chips = sheet.getByRole("group", { name: "Suggested replies" });
+  await expect(chips.getByRole("button")).toHaveText(["We can receive later today", "Deliver on the next day"]);
+  await chips.getByRole("button", { name: "We can receive later today" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Message" })).toHaveValue("We can still receive later today. Please come when you can.");
+  if (process.env.SHOTS_DIR) await page.screenshot({ path: `${process.env.SHOTS_DIR}/16-store-chat-chips.png` });
+  await sheet.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => sent.find((c) => c.kind === "message:Post")?.payload).toMatchObject({ to: "dispatch", templateId: "storereply.later_today" });
+});
+
+test("a question the dispatcher asks the stores still waiting gets Yes or No, answered back to them, never the driver", async ({ page }) => {
+  const asked = tripThread("trip-1", "VEH043", ["OUT085"], "store_manager", [
+    said("m1", new Date(Date.now() - 2 * 60_000).toISOString(), { body: "Can you wait 30 minutes more?", audience: "channel" }),
+  ]);
+  // As the server gives a store while its delivery is on the way and the channel is open (R-MSG-16, R-MSG-08).
+  asked.members = [
+    { to: "dispatch", outletId: null, label: "Dispatcher" },
+    { to: "driver", outletId: null, label: "Your driver" },
+    { to: "channel", outletId: null, label: "Dispatcher and stores still waiting" },
+  ];
+  const { sent } = await mockStore(page, { threads: [asked] });
+  const { DELIVERY } = await import("./mocks.ts");
+  await page.route("**/api/execution/deliveries**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ ...DELIVERY, outcome: "PENDING", startedAt: new Date().toISOString() }]) }));
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Deliveries/ }).click();
+  await page.getByRole("region", { name: "Today" }).getByRole("article", { name: "VEH043" }).getByRole("button", { name: "Message" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "Messages · VEH043" });
+  const chips = sheet.getByRole("group", { name: "Suggested replies" });
+  await expect(chips.getByRole("button")).toHaveText(["Yes, we can wait", "No, deliver tomorrow"]);
+  await chips.getByRole("button", { name: "No, deliver tomorrow" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Message" })).toHaveValue("No, we can't. Please deliver on the next delivery day.");
+  await expect(sheet.getByRole("radio", { name: "Dispatcher and stores still waiting" })).toHaveAttribute("aria-checked", "true");
+  await sheet.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => sent.find((c) => c.kind === "message:Post")?.payload).toMatchObject({ to: "channel", templateId: "storereply.no" });
+});

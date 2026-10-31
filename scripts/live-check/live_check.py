@@ -467,7 +467,8 @@ class LiveCheck:
                     slow=SLOW_S if timeout == TIMEOUT_S else timeout)
 
     def fixes(self, points):
-        end = self.now()
+        # A phone stamps its fixes with its own clock, real time, not the demo clock (DEMO-12).
+        end = dt.datetime.now(dt.timezone.utc)
         out = []
         for i, (lat, lon) in enumerate(points):
             at = end - dt.timedelta(seconds=10 * (len(points) - 1 - i) + 2)
@@ -584,6 +585,11 @@ class LiveCheck:
         self.ensure_outlet(second["outlet"])
         self.open_stream("pos-outlet1", "store_manager", f"/api/execution/positions/stream?outlet={first['outlet']}&date={day}")
         self.open_stream("pos-outlet2", "store_manager", f"/api/execution/positions/stream?outlet={second['outlet']}&date={day}")
+
+        # R-LOD-13: a trip is taken for loading only once its driver has reported at the depot.
+        print("\n== delivery:ArriveAtDepot (driver)")
+        a.must("driver", "delivery:ArriveAtDepot", {"vehicleId": self.vehicle, "serviceDate": day.isoformat()})
+        time.sleep(3)  # Loading hears it through the outbox relay
 
         print("\n== Loader PIN operator")
         loader = a.users["loader"]

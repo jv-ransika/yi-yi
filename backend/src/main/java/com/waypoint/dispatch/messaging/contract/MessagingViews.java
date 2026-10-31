@@ -91,7 +91,13 @@ public final class MessagingViews {
        * dispatcher can act on that stop beside the report (R-EXE-31); empty for a
        * message, or a report about no stop.
        */
-      Optional<String> aboutOutletId) {
+      Optional<String> aboutOutletId,
+      /**
+       * What the message does, as read sure enough to steer the suggested replies
+       * (R-ML-43): a problem, an act such as ASKS_CAN_WAIT or SAYS_NO, or OFF_TOPIC;
+       * empty while unread, unsure, or Jev is off.
+       */
+      Optional<String> understood) {
     public MessageView {
       voicePeaks = List.copyOf(voicePeaks);
     }
@@ -107,8 +113,14 @@ public final class MessagingViews {
    * @param language en, si or ta, as the engine named it
    * @param audioKept false once the note's audio passed its retention and only the
    *     words are left (R-MSG-15): the screen says the audio is no longer kept
+   * @param unclear the engine said noise or cut-off words leave part of it uncertain: every reader is told (R-ML-37)
    */
-  public record TranscriptView(String status, Optional<String> text, Optional<String> language, boolean audioKept) {}
+  public record TranscriptView(String status, Optional<String> text, Optional<String> language, boolean audioKept,
+      boolean unclear) {
+    public TranscriptView(String status, Optional<String> text, Optional<String> language, boolean audioKept) {
+      this(status, text, language, audioKept, false);
+    }
+  }
 
   /** A page of messages, newest first; {@code nextCursor} reads older ones. */
   public record MessagePage(List<MessageView> items, Optional<String> nextCursor) {

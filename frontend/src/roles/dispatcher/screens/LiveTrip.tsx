@@ -5,6 +5,7 @@ import type { RunSheetStopView } from "@shared/domain/types";
 import { ConnectionStatus, cx } from "@shared/ui";
 import { activity, etaOf, limits, round1, runTitle, silentMinutes, type Run } from "../data/liveDesk.ts";
 import { useFuel } from "../data/useDay.ts";
+import { useStoreContacts } from "../data/storeContacts.ts";
 import { driverLine, useDriver } from "./LivePanel.tsx";
 import { Bar, Chip, STATUS } from "./LiveParts.tsx";
 import LiveTripUpdate from "./LiveTripUpdate.tsx";
@@ -34,6 +35,7 @@ export default function LiveTrip({
 }): React.JSX.Element {
   const { name } = useDriver(run);
   const fuel = useFuel(run.day.vehicleId, date);
+  const contacts = useStoreContacts(run.day.stops.map((s) => s.outletId));
   const look = STATUS[run.status];
   const next = run.day.current;
   const quiet = silentMinutes(run, now);
@@ -58,7 +60,8 @@ export default function LiveTrip({
         </div>
       </header>
 
-      <div className="grid w-full items-start gap-4 lg:grid-cols-[280px_1fr_300px]">
+      {/* The stops take the width beside the driver's cards; activity and the update sit in a row below. */}
+      <div className="grid w-full items-start gap-4 lg:grid-cols-[280px_1fr]">
         <div className="flex flex-col gap-4">
           <Card>
             {/* The name and its staff number stay on one line; the ping chip wraps below instead. */}
@@ -110,6 +113,7 @@ export default function LiveTrip({
             <thead>
               <tr className="border-b border-go-rule text-[12px] text-go-secondary">
                 <th className="py-2 pr-3 font-normal">Outlet</th>
+                <th className="py-2 pr-3 font-normal">Store manager</th>
                 <th className="py-2 pr-3 font-normal">Expected</th>
                 <th className="py-2 pr-3 font-normal">Status</th>
                 <th className="py-2 pr-3 font-normal">Told</th>
@@ -125,6 +129,16 @@ export default function LiveTrip({
                     <td className="whitespace-nowrap py-3 pr-3 font-semibold text-go-ink">
                       <span aria-hidden className={cx("mr-2 inline-block size-2 rounded-full", st.dot)} />
                       {s.outletId}
+                    </td>
+                    <td className="py-3 pr-3 text-go-secondary">
+                      {contacts.error ? "Could not be read" : !contacts.data ? "Reading…" : (contacts.data[s.outletId] ?? []).length === 0 ? "No store manager" : (
+                        contacts.data[s.outletId]!.map((c) => (
+                          <span key={`${c.name}|${c.phone ?? ""}`} className="block">
+                            <span className="text-go-ink">{c.name}</span>
+                            <span className={cx("block", c.phone && "whitespace-nowrap tabular-nums")}>{c.phone ?? "No phone on their profile"}</span>
+                          </span>
+                        ))
+                      )}
                     </td>
                     <td className="py-3 pr-3 tabular-nums">{etaOf(s)}</td>
                     <td className={cx("py-3 pr-3", st.text)}>{st.label}</td>
@@ -147,7 +161,7 @@ export default function LiveTrip({
           )}
         </Card>
 
-        <div className="flex flex-col gap-4">
+        <div className="grid items-start gap-4 md:grid-cols-2 lg:col-span-2">
           <Card>
             <h2 className="text-[15px] font-medium text-go-ink">Trip activity</h2>
             <ul className="flex flex-col gap-2.5">

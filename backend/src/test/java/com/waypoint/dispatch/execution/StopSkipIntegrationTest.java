@@ -38,6 +38,7 @@ import java.sql.Date;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -107,6 +108,10 @@ class StopSkipIntegrationTest {
   @DynamicPropertySource
   static void databaseUrl(DynamicPropertyRegistry registry) {
     registry.add("app.database-url", TestDatabase::url);
+    // R-ML-35: what Jev read from a message is on the card; nothing here calls a model, rows are written below.
+    registry.add("app.ai.jev-enabled", () -> "true");
+    registry.add("app.ai.jev-live", () -> "true");
+    registry.add("app.ai.openrouter-key", () -> "test-only");
   }
 
   @BeforeEach
@@ -381,6 +386,197 @@ class StopSkipIntegrationTest {
         "SELECT count(*) AS n FROM ml.decision_suggestions WHERE delivery_id = ? AND chosen = 'SKIP_NEXT_DAY'",
         stopOne)).get("n")).longValue();
     assertEquals(1, kept);
+  }
+
+  @Test
+  void theTripsOutlookFollowsItsOpenReportsAcrossEveryStopStillWaiting() throws Exception {
+    // R-ML-34: nothing reported yet, nothing to suggest.
+    String path = "/api/ml/trip-outlook?tripId=" + tripId;
+    JsonNode quiet = json(read(dispatcher, path, 200));
+    assertTrue(quiet.get("trip").isEmpty() && quiet.get("stops").isEmpty(), quiet.toString());
+
+    // The van is at the first store and finds it closed, then breaks down.
+    command(driver, "delivery:RecordArrival", 1L, stop(stopOne), 200);
+    command(driver, "delivery:ReportStopProblem", null, "{\"deliveryId\":\"" + stopOne + "\",\"problem\":\"STORE_CLOSED\"}", 200);
+    command(driver, "delivery:ReportFault", null,
+        "{\"vehicleId\":\"" + vehicleId + "\",\"kind\":\"vehicle\",\"description\":\"clutch gone\"}", 200);
+    drain();
+
+    JsonNode o = json(read(dispatcher, path, 200));
+    assertEquals("BREAKDOWN", o.get("situation").asText(), o.toString());
+    assertEquals("END_TRIP", o.get("trip").get(0).get("action").asText());
+    // R-ML-36: the driver is standing at the closed store: that is the room's problem before the breakdown.
+    assertEquals("STORE_CLOSED", o.get("room").get("situation").asText(), o.get("room").toString());
+    assertEquals(3, o.get("stops").size(), "every stop still waiting");
+    JsonNode first = o.get("stops").get(0);
+    assertEquals(stopOne.toString(), first.get("deliveryId").asText());
+    assertEquals("STORE_CLOSED", first.get("situation").asText(), "its own report leads at its own stop");
+    JsonNode second = o.get("stops").get(1);
+    assertEquals("BREAKDOWN", second.get("situation").asText());
+    double skip = 0;
+    for (JsonNode c : second.get("chances")) {
+      if ("SKIP_NEXT_DAY".equals(c.get("action").asText())) {
+        skip = c.get("chance").asDouble();
+      }
+    }
+    assertTrue(skip >= o.get("trip").get(0).get("chance").asDouble(), "ending the trip sends it to the next day");
+    assertTrue(o.get("signals").size() >= 2, o.toString());
+    assertFalse(o.toString().contains("clutch"), "no words of a report cross");
+
+    // Skipping the closed store decides it: it leaves the outlook.
+    skip(dispatcher, stopOne, json(read(driver, "/api/execution/run-sheets?date=" + day, 200)).get(0).get("stops").get(0).get("rowVersion").asLong(),
+        "NEXT_DAY", "Store closed, the driver reported it", 200);
+    drain();
+    JsonNode after = json(read(dispatcher, path, 200));
+    assertEquals(2, after.get("stops").size(), after.toString());
+
+    // Another depot's dispatcher and a store manager are refused, never answered with nothing.
+    read(farDispatcher, path, 403);
+    read(storeTwo, path, 403);
+  }
+
+  @Test
+  void theProblemRoomAsksTheStoresAndAStoreThatSaysNoIsTheNextToSkip() throws Exception {
+    // R-ML-36: no problem, no room.
+    String path = "/api/ml/trip-outlook?tripId=" + tripId;
+    assertTrue(json(read(dispatcher, path, 200)).get("room").isNull(), "nothing open");
+
+    command(driver, "delivery:ReportFault", null,
+        "{\"vehicleId\":\"" + vehicleId + "\",\"kind\":\"vehicle\",\"description\":\"clutch gone\"}", 200);
+    drain();
+    // An hour more, the most a store is asked to wait: each store whose window it misses is asked, never a mall.
+    JsonNode room = json(read(dispatcher, path + "&extraMinutes=60", 200)).get("room");
+    assertEquals("BREAKDOWN", room.get("situation").asText(), room.toString());
+    assertEquals(3, room.get("rows").size());
+    JsonNode next = room.get("next");
+    assertEquals("ASK", next.get("kind").asText(), next.toString());
+    assertTrue(next.get("endTripToo").asBoolean(), "the driver may not go on: end trip beside it");
+    assertEquals(60, next.get("extraMinutes").asInt());
+    java.util.List<String> asked = new java.util.ArrayList<>();
+    next.get("stops").forEach(t -> asked.add(t.get("outletId").asText()));
+    assertTrue(asked.contains(OUTLET) && !asked.contains(MALL_OUTLET), "a mall is never asked: " + asked);
+    read(dispatcher, path + "&extraMinutes=120", 422);
+
+    // The dispatcher sends each question the step names; the first store says No, the rest Yes.
+    JsonNode decisions = null;
+    java.util.List<UUID> requests = new java.util.ArrayList<>();
+    for (JsonNode t : next.get("stops")) {
+      requests.add(UUID.fromString(json(command(dispatcher, "issue:AskDecision", null,
+          "{\"kind\":\"receive_late\",\"deliveryId\":\"" + t.get("deliveryId").asText() + "\",\"receiveAt\":\""
+              + t.get("receiveAt").asText() + "\"}", 200)).get("result").get("requestId").asText()));
+    }
+    decisions = json(read(dispatcher, "/api/issues/decisions?date=" + day, 200));
+    String refused = next.get("stops").get(0).get("outletId").asText();
+    for (int i = 0; i < requests.size(); i++) {
+      String outlet = next.get("stops").get(i).get("outletId").asText();
+      long version = 0;
+      for (JsonNode d : decisions) {
+        if (d.get("requestId").asText().equals(requests.get(i).toString())) version = d.get("rowVersion").asLong();
+      }
+      command(outlet.equals(OUTLET) ? storeOne : storeTwo, "issue:AnswerDecision", version,
+          "{\"requestId\":\"" + requests.get(i) + "\",\"answer\":\"" + (i == 0 ? "no" : "yes") + "\"}", 200);
+    }
+
+    JsonNode after = json(read(dispatcher, path + "&extraMinutes=60", 200)).get("room");
+    for (JsonNode r : after.get("rows")) {
+      if (r.get("outletId").asText().equals(refused)) assertEquals("NO", r.get("state").asText(), after.toString());
+    }
+    JsonNode step = after.get("next");
+    assertEquals("SKIP", step.get("kind").asText(), step.toString());
+    assertEquals(refused, step.get("stops").get(0).get("outletId").asText());
+    assertTrue(step.get("why").asText().startsWith(refused + " can't receive at"), step.toString());
+  }
+
+  @Test
+  void aVoiceNoteHeardUnclearlyWaitsForTheDispatcherToConfirmWhatItReports() throws Exception {
+    // R-ML-37: the driver spoke over the engine; Jev read a breakdown, but the words were unclear.
+    String path = "/api/ml/trip-outlook?tripId=" + tripId;
+    UUID noisy = UUID.randomUUID();
+    database.asSystemSeparately(ModuleRole.ML, () -> database.update(
+        "INSERT INTO ml.message_situations (message_id, trip_id, depot_code, author_role, source, masked_text, option_order,"
+            + " status, situation, confidence, model, prompt_version, created_at, answered_at, unclear)"
+            + " VALUES (?, ?, ?, 'driver', 'voice', 'engine ... stopped', '{BREAKDOWN,OTHER}', 'answered', 'BREAKDOWN', 0.97,"
+            + " 'stub', 'v1', ?, ?, true)",
+        noisy, tripId.toString(), depot, java.sql.Timestamp.from(clock.now()), java.sql.Timestamp.from(clock.now())));
+    JsonNode before = json(read(dispatcher, path, 200));
+    assertTrue(before.get("room").isNull(), "an unclear reading opens nothing by itself: " + before);
+    assertEquals(1, before.get("toReview").size());
+    JsonNode review = before.get("toReview").get(0);
+    assertEquals(noisy.toString(), review.get("messageId").asText());
+    assertEquals("BREAKDOWN", review.get("guess").asText());
+    assertTrue(review.get("unclear").asBoolean());
+    // The watcher's "Needs you" lists it too, so it is not missed with the chat closed.
+    String checks = "/api/ml/messages-to-check?depot=" + depot + "&date=" + day;
+    JsonNode listed = json(read(dispatcher, checks, 200));
+    assertEquals(1, listed.size(), listed.toString());
+    assertEquals(tripId.toString(), listed.get(0).get("tripId").asText());
+    read(farDispatcher, checks, 403);
+
+    String confirm = "{\"tripId\":\"" + tripId + "\",\"messageId\":\"" + noisy + "\",\"situation\":\"%s\"}";
+    command(dispatcher, "ml:ConfirmSignal", null, String.format(confirm, "FLAT_EARTH"), 422);
+    command(farDispatcher, "ml:ConfirmSignal", null, String.format(confirm, "BREAKDOWN"), 403);
+    command(driver, "ml:ConfirmSignal", null, String.format(confirm, "BREAKDOWN"), 403);
+    command(dispatcher, "ml:ConfirmSignal", null, String.format(confirm, "BREAKDOWN"), 200);
+
+    JsonNode after = json(read(dispatcher, path, 200));
+    assertTrue(after.get("toReview").isEmpty(), after.toString());
+    assertTrue(json(read(dispatcher, checks, 200)).isEmpty(), "checked, it leaves Needs you");
+    assertEquals("BREAKDOWN", after.get("room").get("situation").asText(), "confirmed, it opens the room");
+    Map<String, Object> row = database.asSystemSeparately(ModuleRole.ML, () -> database.queryOne(
+        "SELECT reviewed_by, reviewed_situation FROM ml.message_situations WHERE message_id = ?", noisy));
+    assertEquals(dispatcherId, row.get("reviewed_by"), "rule 8: who");
+
+    // Confirmed as nothing, it leaves the room again.
+    command(dispatcher, "ml:ConfirmSignal", null, String.format(confirm, "OTHER"), 200);
+    assertTrue(json(read(dispatcher, path, 200)).get("room").isNull());
+  }
+
+  @Test
+  void aMessageReadAsABreakdownIsOnTheTripsCardUntilTheDispatcherTakesItOffWithAReason() throws Exception {
+    // R-ML-35: the driver wrote, Jev read it as a breakdown; a second read was not sure enough.
+    String path = "/api/ml/trip-outlook?tripId=" + tripId;
+    UUID sure = UUID.randomUUID();
+    UUID unsure = UUID.randomUUID();
+    for (Object[] m : new Object[][] {{sure, 0.82}, {unsure, 0.31}}) {
+      database.asSystemSeparately(ModuleRole.ML, () -> database.update(
+          "INSERT INTO ml.message_situations (message_id, trip_id, depot_code, author_role, source, masked_text, option_order,"
+              + " status, situation, confidence, model, prompt_version, created_at, answered_at)"
+              + " VALUES (?, ?, ?, 'driver', 'message', 'engine light is on', '{BREAKDOWN,OTHER}', 'answered', 'BREAKDOWN', ?,"
+              + " 'stub', 'v1', now(), now())",
+          m[0], tripId.toString(), depot, m[1]));
+    }
+    // A third could not be read: the card says so (rule 9).
+    database.asSystemSeparately(ModuleRole.ML, () -> database.update(
+        "INSERT INTO ml.message_situations (message_id, trip_id, depot_code, author_role, source, masked_text, option_order,"
+            + " status, attempts, created_at) VALUES (?, ?, ?, 'store_manager', 'voice', 'words', '{OTHER}', 'failed', 3, now())",
+        UUID.randomUUID(), tripId.toString(), depot));
+    JsonNode o = json(read(dispatcher, path, 200));
+    assertEquals("BREAKDOWN", o.get("situation").asText(), o.toString());
+    assertEquals(1, o.get("signals").size(), "the unsure read adds nothing: " + o);
+    assertTrue(o.get("messagesRead").asBoolean());
+    assertEquals(1, o.get("unreadMessages").asInt(), "the one that could not be read is counted");
+    JsonNode signal = o.get("signals").get(0);
+    assertEquals(sure.toString(), signal.get("messageId").asText());
+    assertEquals("message", signal.get("source").asText());
+    assertEquals("driver", signal.get("authorRole").asText());
+    assertEquals(3, o.get("stops").size(), "a breakdown touches every stop still waiting");
+
+    // Taking it off needs a reason; another depot's dispatcher and a driver are refused.
+    String off = "{\"tripId\":\"" + tripId + "\",\"messageId\":\"" + sure + "\",\"reason\":\"%s\"}";
+    command(dispatcher, "ml:DismissSignal", null, String.format(off, " "), 422);
+    command(farDispatcher, "ml:DismissSignal", null, String.format(off, "Not a breakdown"), 403);
+    command(driver, "ml:DismissSignal", null, String.format(off, "Not a breakdown"), 403);
+    JsonNode done = json(command(dispatcher, "ml:DismissSignal", null, String.format(off, "Only a warning light, driving on"), 200));
+    assertFalse(done.get("result").get("alreadyDismissed").asBoolean());
+    JsonNode again = json(command(dispatcher, "ml:DismissSignal", null, String.format(off, "Only a warning light, driving on"), 200));
+    assertTrue(again.get("result").get("alreadyDismissed").asBoolean(), "taking it off twice is harmless");
+
+    JsonNode after = json(read(dispatcher, path, 200));
+    assertTrue(after.get("trip").isEmpty() && after.get("stops").isEmpty(), after.toString());
+    Map<String, Object> row = database.asSystemSeparately(ModuleRole.ML, () -> database.queryOne(
+        "SELECT dismissed_by, dismiss_reason FROM ml.message_situations WHERE message_id = ?", sure));
+    assertEquals(dispatcherId, row.get("dismissed_by"), "rule 8: who");
+    assertEquals("Only a warning light, driving on", row.get("dismiss_reason"), "rule 8: why");
   }
 
   @Test

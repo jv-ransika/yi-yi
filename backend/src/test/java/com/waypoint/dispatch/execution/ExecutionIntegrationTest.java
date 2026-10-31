@@ -1097,6 +1097,165 @@ class ExecutionIntegrationTest {
     read(manager, "/api/outlets/" + OUTLET + "/contacts", 403);
   }
 
+  @Test
+  void aTripsStoresAreReadInOneRequestAndOneOutletOutsideRefusesTheWholeRead() throws Exception {
+    database.asModule(ModuleRole.IAM, null, () -> database.update(
+        "UPDATE iam.users SET phone = '+94771234567' WHERE email = ?", manager));
+    JsonNode both = json(read(dispatcher, "/api/outlets/contacts?ids=" + OUTLET + "," + MALL_OUTLET + "," + OUTLET, 200));
+    assertEquals(2, both.size(), "each outlet once: " + both);
+    assertTrue(both.get(MALL_OUTLET).isArray(), "an outlet with no manager is an empty list: " + both);
+    boolean found = false;
+    for (JsonNode c : both.get(OUTLET)) {
+      found |= "+94771234567".equals(c.path("phone").asText());
+    }
+    assertTrue(found, both.toString());
+    // One outlet of another depot: the same 404 as an unknown one, and nothing of the others.
+    read(dispatcher, "/api/outlets/contacts?ids=" + OUTLET + "," + OTHER_DEPOT_OUTLET, 404);
+    read(manager, "/api/outlets/contacts?ids=" + OUTLET, 403);
+    StringBuilder many = new StringBuilder(OUTLET);
+    for (int i = 100; i < 131; i++) many.append(",OUT").append(i);
+    read(dispatcher, "/api/outlets/contacts?ids=" + many, 422);
+  }
+
+  // ---- a vehicle broken down (docs/issues/vehicle-broken/PLAN.md, R-FLT-06) ----
+
+  @Test
+  void theDriverMarksTheirOwnVehicleBrokenAndOkTodayAndTheDispatcherIsToldEachTime() throws Exception {
+    at("06:00");
+    statusSince = Instant.now();
+    String broken = "{\"vehicleId\":\"" + vehicleId + "\",\"serviceDate\":\"" + day + "\",\"status\":\"unavailable\"}";
+    // Not another driver's vehicle, not another day, nothing but broken or OK.
+    send(otherDriver, "vehicle:SetDayStatus", null, broken, 403);
+    send(driver, "vehicle:SetDayStatus", null,
+        "{\"vehicleId\":\"" + vehicleId + "\",\"serviceDate\":\"" + day.plusDays(1) + "\",\"status\":\"unavailable\"}", 403);
+    send(driver, "vehicle:SetDayStatus", null,
+        "{\"vehicleId\":\"" + vehicleId + "\",\"serviceDate\":\"" + day + "\",\"status\":\"in_workshop\"}", 422);
+
+    send(driver, "vehicle:SetDayStatus", null, broken, 200);
+    send(driver, "vehicle:SetDayStatus", null, broken, 200);
+    assertEquals("unavailable", database.asModule(ModuleRole.REF, null, () -> database.queryOne(
+        "SELECT status FROM ref.vehicle_day_status WHERE vehicle_id = ? AND service_date = ?",
+        vehicleId, java.sql.Date.valueOf(day))).get("status"));
+    assertEquals(1, statusEvents(), "a repeat of the same status announces nothing twice");
+    drain();
+    assertTrue(dispatcherTitles().contains(vehicleId + " out of use"), dispatcherTitles().toString());
+
+    send(driver, "vehicle:SetDayStatus", null, broken.replace("unavailable", "available"), 200);
+    assertEquals(2, statusEvents());
+    drain();
+    assertTrue(dispatcherTitles().contains(vehicleId + " back in use"), dispatcherTitles().toString());
+    // A driver who holds two vehicles today may mark either (found on the live stack, 2026-10-22).
+    String second = reference.availableVehicles(depot, day, null).stream().map(v -> v.vehicleId())
+        .filter(v -> !v.equals(vehicleId) && !v.equals(otherVehicleId)).filter(v -> !alreadyAssigned(v, v, day, day.plusDays(1)))
+        .findFirst().orElseThrow();
+    database.asModule(ModuleRole.IAM, null, () -> {
+      assign(driverId, second, day, day.plusDays(1));
+      return null;
+    });
+    send(driver, "vehicle:SetDayStatus", null,
+        "{\"vehicleId\":\"" + second + "\",\"serviceDate\":\"" + day + "\",\"status\":\"unavailable\"}", 200);
+  }
+
+  private Instant statusSince;
+
+  /** Outbox rows are stamped on real time, so counted from the test's own start. */
+  private long statusEvents() {
+    return ((Number) database.asSystemSeparately(ModuleRole.INTEGRATION, () -> database.queryOne(
+        "SELECT count(*) AS n FROM integration.outbox_events WHERE event_type = 'vehicle.status_changed'"
+            + " AND aggregate_id = ? AND occurred_at >= ?", vehicleId, java.sql.Timestamp.from(statusSince))).get("n"))
+        .longValue();
+  }
+
+  private List<String> dispatcherTitles() throws Exception {
+    List<String> titles = new java.util.ArrayList<>();
+    json(read(dispatcher, "/api/notifications?limit=50", 200)).path("items").forEach(n -> titles.add(n.path("title").asText()));
+    return titles;
+  }
+
+  // ---- demo trucks record their stops (docs/issues/demo-stops/PLAN.md, R-DEMO-04) ----
+
+  @Autowired com.waypoint.dispatch.platform.messaging.CommandBus bus;
+  @Autowired com.waypoint.dispatch.demo.application.SimulationJob simulationJob;
+  @Autowired com.waypoint.dispatch.demo.application.DemoSettingsQuery demoSettings;
+  @Autowired com.waypoint.dispatch.identity.contract.IdentityQuery identity;
+
+  @Test
+  void aSimulatedTruckArrivesAndDeliversEachStopOnceAndNeverRecordsTheReceipt() throws Exception {
+    at("05:00");
+    String adminEmail = "xa-" + UUID.randomUUID().toString().substring(0, 8) + "@execution.test";
+    var admin = com.waypoint.dispatch.shared.domain.Actor.user(accounts.createAccount(adminEmail, "Admin", PASSWORD, "admin"));
+    // The demo admin holds every depot (demo-accounts); this one holds the trip's.
+    accounts.grantDepot(adminEmail, depot);
+    if (!demoSettings.view().enabled()) {
+      bus.dispatch(admin, demo("Enable", demoSettings.view().rowVersion(), Map.of("reason", "Simulated stops")));
+    }
+    try {
+      bus.dispatch(admin, demo("StartSimulation", null,
+          Map.of("reason", "Simulated stops", "vehicleId", vehicleId, "serviceDate", day.toString())));
+      UUID simulation = (UUID) database.asSystem(ModuleRole.DEMO, () -> database.queryOne(
+          "SELECT id FROM demo.simulations WHERE vehicle_id = ? AND service_date = ? AND status = 'running'",
+          vehicleId, java.sql.Date.valueOf(day))).get("id");
+      String status = "running";
+      for (int i = 0; i < 400 && "running".equals(status); i++) {
+        simulationJob.run(Instant.now());
+        status = (String) database.asSystem(ModuleRole.DEMO, () -> database.queryOne(
+            "SELECT status FROM demo.simulations WHERE id = ?", simulation)).get("status");
+      }
+      Map<String, Object> done = database.asSystem(ModuleRole.DEMO, () -> database.queryOne(
+          "SELECT status, failure, stops_recorded, jsonb_array_length(stops) AS stops FROM demo.simulations WHERE id = ?",
+          simulation));
+      assertEquals("finished", done.get("status"), done.toString());
+      assertEquals(3, ((Number) done.get("stops_recorded")).intValue(), done.toString());
+      JsonNode stops = runSheet(driver).get("stops");
+      for (JsonNode stop : stops) {
+        assertEquals("DELIVERED", stop.get("outcome").asText(), stop.toString());
+        assertTrue(stop.hasNonNull("arrivedAt"), "the arrival was recorded first: " + stop);
+      }
+      drain();
+      assertFalse(orderStatus(orderA).contains("RECEIV"), "the store still confirms the receipt by hand: " + orderStatus(orderA));
+
+      // The same ticks again: every command is answered by its receipt, nothing is recorded twice.
+      long versions = stops.get(0).get("rowVersion").asLong();
+      database.asSystem(ModuleRole.DEMO, () -> database.update(
+          "UPDATE demo.simulations SET status = 'running', tick = 0 WHERE id = ?", simulation));
+      for (int i = 0; i < 400; i++) simulationJob.run(Instant.now());
+      assertEquals(versions, runSheet(driver).get("stops").get(0).get("rowVersion").asLong());
+    } finally {
+      bus.dispatch(admin, demo("Disable", demoSettings.view().rowVersion(), Map.of("reason", "End simulated stops")));
+    }
+  }
+
+  @Test
+  void theDemoDriverAccountIsKnownSoItsTruckIsLeftToAPerson() {
+    if (database.asSystem(ModuleRole.IAM, () -> database.queryOne(
+        "SELECT 1 FROM iam.users WHERE email = 'driver@waypoint.local'")) == null) {
+      accounts.createAccount("driver@waypoint.local", "Demo driver", PASSWORD, "driver");
+    }
+    UUID demoDriver = (UUID) database.asSystem(ModuleRole.IAM, () -> database.queryOne(
+        "SELECT user_id FROM iam.users WHERE email = 'driver@waypoint.local'")).get("user_id");
+    assertEquals(Optional.of(demoDriver), database.asSystem(ModuleRole.IAM, () -> identity.demoAccount("driver")));
+    assertEquals(Optional.empty(), database.asSystem(ModuleRole.IAM, () -> identity.demoAccount("nobody")));
+  }
+
+  private com.waypoint.dispatch.platform.messaging.Command demo(String verb, Long version, Map<String, Object> payload) {
+    return new com.waypoint.dispatch.platform.messaging.Command(
+        UUID.randomUUID(), "demo:" + verb, version, mapper.valueToTree(payload), Instant.now());
+  }
+
+  // ---- product names (docs/issues/product-names/PLAN.md) ----
+
+  @Test
+  void theDriverReadsTheNamesOfTheProductsOnTheirStopsButNothingWithoutASession() throws Exception {
+    // The loader's and driver's policies gained warehouse:ReadCatalogue for names only.
+    assertTrue(json(read(driver, "/api/warehouse/catalogue/names?ids=P-1,P-2", 200)).isObject());
+    assertTrue(json(read(dispatcher, "/api/warehouse/catalogue/names?ids=P-1", 200)).isObject());
+    int unsigned = http.perform(get("/api/warehouse/catalogue/names?ids=P-1")).andReturn().getResponse().getStatus();
+    assertEquals(401, unsigned);
+    StringBuilder many = new StringBuilder("P-0");
+    for (int i = 1; i <= 200; i++) many.append(",P-").append(i);
+    read(driver, "/api/warehouse/catalogue/names?ids=" + many, 422);
+  }
+
   // ---- positions (issue #161) ----
 
   private JsonNode presenceOf(String vehicle) throws Exception {

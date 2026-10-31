@@ -161,6 +161,15 @@ class IntelligenceDomainTest {
   }
 
   @Test
+  void aServiceHoldingSeveralModelsAnswersWhenTheActiveOneIsAmongThem() {
+    // Issue #12, R-ML-39: the image's model and the store's, each named by the request.
+    assertTrue(ModelGate.decide("delivery_risk", true, Optional.of("ours@2"), Served.loaded(List.of("image@1", "ours@2")))
+        .useModel());
+    assertGate(ModelGate.decide("delivery_risk", true, Optional.of("ours@3"), Served.loaded(List.of("image@1", "ours@2"))),
+        "has image@1, ours@2 but the active model is ours@3");
+  }
+
+  @Test
   void everyOtherCaseIsDegradedWithItsReason() {
     assertGate(ModelGate.decide("delivery_risk", false, Optional.of("m@1"), Served.loaded("m@1")), "not configured");
     assertGate(ModelGate.decide("delivery_risk", true, Optional.empty(), Served.loaded("m@1")), "no delivery_risk model");
@@ -276,6 +285,16 @@ class IntelligenceDomainTest {
     assertEquals(colombo("2026-10-03T20:00"), ForecastSchedule.nextRun(colombo("2026-10-03T14:05"), last, true, COLOMBO));
     assertEquals(colombo("2026-10-05T00:00"), ForecastSchedule.nextRun(colombo("2026-10-03T14:05"), last, false, COLOMBO),
         "with no model a retry would only write the fallback again");
+  }
+
+  @Test
+  void aModelActivatedAfterAFallbackRunIsOwedAForecastAtOnce() {
+    var last = ran("2026-10-03T14:00", true);
+    var now = colombo("2026-10-03T15:05");
+    assertTrue(ForecastSchedule.due(now, last, Optional.of(colombo("2026-10-03T15:00")), COLOMBO), "activated after the run");
+    assertFalse(ForecastSchedule.due(now, last, Optional.of(colombo("2026-10-03T13:00")), COLOMBO), "activated before: the six hours stand");
+    assertEquals(colombo("2026-10-03T16:00"),
+        ForecastSchedule.nextRun(now, last, Optional.of(colombo("2026-10-03T15:00")), COLOMBO), "the next hourly run");
   }
 
   // ---- routes ---------------------------------------------------------------------------------

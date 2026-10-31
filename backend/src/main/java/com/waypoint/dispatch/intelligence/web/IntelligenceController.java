@@ -23,6 +23,7 @@ import com.waypoint.dispatch.shared.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -52,6 +53,10 @@ public class IntelligenceController {
   private final RequestAuthorizer authorizer;
   private final com.waypoint.dispatch.intelligence.application.AiExplainer explainer;
   private final com.waypoint.dispatch.intelligence.application.PlaybookQuery playbooks;
+  private final com.waypoint.dispatch.intelligence.application.TripOutlookQuery tripOutlook;
+  private final com.waypoint.dispatch.intelligence.application.ReplyDraftQuery replyDrafts;
+  private final com.waypoint.dispatch.intelligence.application.DraftRiskQuery draftRisks;
+  private final com.waypoint.dispatch.intelligence.application.MessageChecksQuery messageChecks;
   private final com.waypoint.dispatch.intelligence.application.AiHealthQuery aiHealth;
 
   public IntelligenceController(
@@ -65,10 +70,18 @@ public class IntelligenceController {
       RequestAuthorizer authorizer,
       com.waypoint.dispatch.intelligence.application.AiExplainer explainer,
       com.waypoint.dispatch.intelligence.application.PlaybookQuery playbooks,
+      com.waypoint.dispatch.intelligence.application.TripOutlookQuery tripOutlook,
+      com.waypoint.dispatch.intelligence.application.ReplyDraftQuery replyDrafts,
+      com.waypoint.dispatch.intelligence.application.DraftRiskQuery draftRisks,
+      com.waypoint.dispatch.intelligence.application.MessageChecksQuery messageChecks,
       com.waypoint.dispatch.intelligence.application.AiHealthQuery aiHealth) {
     this.aiHealth = aiHealth;
     this.explainer = explainer;
     this.playbooks = playbooks;
+    this.tripOutlook = tripOutlook;
+    this.replyDrafts = replyDrafts;
+    this.draftRisks = draftRisks;
+    this.messageChecks = messageChecks;
     this.intelligence = intelligence;
     this.outlook = outlook;
     this.attention = attention;
@@ -151,7 +164,27 @@ public class IntelligenceController {
     return intelligence.backtest(read(request, "wpt:ml:model:*"), weeks);
   }
 
+  /**
+   * Issue #12, R-ML-40: each night's comparison of the shadow with the model
+   * that answered, newest first. Read before promoting a shadow; a rollback the
+   * system made is on its review.
+   */
+  @GetMapping("/models/shadow-reviews")
+  public List<com.waypoint.dispatch.intelligence.contract.ModelViews.ShadowReviewView> shadowReviews(
+      @RequestParam(required = false, defaultValue = "30") int limit, HttpServletRequest request) {
+    return intelligence.shadowReviews(read(request, "wpt:ml:model:*"), limit);
+  }
+
   /** Every stop's expected service minutes and P(late), and whether a model or the fallback answered. */
+  /**
+   * A draft plan's late risk, scored now by the active model or the built-in
+   * estimate (R-ML-48); advice for the dispatcher before publishing, kept nowhere.
+   */
+  @GetMapping("/plans/{planId}/draft-risk")
+  public PlanPredictionsView draftRisk(@PathVariable UUID planId, HttpServletRequest request) {
+    return draftRisks.risk(read(request, "wpt:ml:plan:" + planId), planId);
+  }
+
   @GetMapping("/plans/{planId}/predictions")
   public PlanPredictionsView predictions(@PathVariable UUID planId, HttpServletRequest request) {
     return intelligence.predictionsFor(read(request, "wpt:ml:plan:" + planId), planId);
@@ -249,6 +282,26 @@ public class IntelligenceController {
     return intelligence.trainingRoutes(actor, depot, from, to, Optional.ofNullable(after), limit);
   }
 
+  /**
+   * Issue #12, R-ML-38: the outlets, service allowances, traffic speed and
+   * calendar a retraining run reads, as a scoring request builds them.
+   */
+  @GetMapping("/training/reference")
+  public Map<String, Object> trainingReference(
+      @RequestParam List<String> depot,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      HttpServletRequest request) {
+    Actor actor = null;
+    for (String d : depot) {
+      actor = authorizer.require(request, IntelligenceDataQuery.EXPORT, "wpt:ml:training:" + d);
+    }
+    if (actor == null) {
+      throw new DomainException(ErrorCode.VALIDATION_FAILED, "name at least one depot");
+    }
+    return intelligence.trainingReference(actor, depot, from, to);
+  }
+
   /** T1-01: a draft's stops likely to be late, each with the dispatcher's latest keep or swap. */
   @GetMapping("/plans/{planId}/risk-review")
   public com.waypoint.dispatch.intelligence.contract.RiskReviewViews.RiskReviewReport riskReview(
@@ -282,6 +335,42 @@ public class IntelligenceController {
       @org.springframework.web.bind.annotation.RequestParam String situation,
       HttpServletRequest request) {
     return playbooks.forStop(read(request, "wpt:ml:delivery:" + deliveryId), deliveryId, situation);
+  }
+
+  /** R-ML-37: the depot's messages waiting for a dispatcher to check that day, for "Needs you". */
+  @GetMapping("/messages-to-check")
+  public List<com.waypoint.dispatch.intelligence.contract.PlaybookViews.MessageCheckView> messagesToCheck(
+      @org.springframework.web.bind.annotation.RequestParam String depot,
+      @org.springframework.web.bind.annotation.RequestParam java.time.LocalDate date,
+      HttpServletRequest request) {
+    return messageChecks.forDepot(read(request, "wpt:ml:depot:" + depot), depot, date);
+  }
+
+  /**
+   * One trip's decision outlook (R-ML-34): the chance of each decision about the
+   * trip and of each outcome for every stop still waiting, from its open reports.
+   * Advice only.
+   */
+  @GetMapping("/trip-outlook")
+  public com.waypoint.dispatch.intelligence.contract.PlaybookViews.TripOutlookView tripOutlook(
+      @org.springframework.web.bind.annotation.RequestParam String tripId,
+      @org.springframework.web.bind.annotation.RequestParam(required = false) Integer extraMinutes,
+      HttpServletRequest request) {
+    if (extraMinutes != null && (extraMinutes < 0 || extraMinutes > 60)) {
+      throw new com.waypoint.dispatch.shared.error.DomainException(
+          com.waypoint.dispatch.shared.error.ErrorCode.VALIDATION_FAILED, "extraMinutes is 0 to 60: a store is never asked to wait longer");
+    }
+    return tripOutlook.forTrip(read(request, "wpt:ml:trip:" + tripId), tripId, java.util.Optional.ofNullable(extraMinutes));
+  }
+
+  /**
+   * A reply drafted by the language model for a driver's or a store's message no
+   * ready reply fits (R-ML-46); the dispatcher reads, edits and sends it.
+   */
+  @GetMapping("/reply-draft")
+  public com.waypoint.dispatch.intelligence.contract.PlaybookViews.ReplyDraftView replyDraft(
+      @org.springframework.web.bind.annotation.RequestParam java.util.UUID messageId, HttpServletRequest request) {
+    return replyDrafts.draft(read(request, "wpt:ml:message:" + messageId), messageId);
   }
 
   private Actor read(HttpServletRequest request, String resource) {

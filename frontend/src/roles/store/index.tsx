@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useProductNames } from "@shared/catalogue/useProductNames";
 import { useOnline, useResource } from "@shared/api/useResource";
 import { outletWatch } from "@shared/api/changes";
 import { IssueCommandKind, type DecisionView, type OrderView } from "@shared/domain/types";
@@ -20,7 +21,7 @@ import Decisions, { type Answer } from "./screens/Decisions.tsx";
 import Home from "./screens/Home.tsx";
 import Issues from "./screens/issues/Issues.tsx";
 import OrderSheet from "./screens/OrderSheet.tsx";
-import Orders from "./screens/Orders.tsx";
+import Orders, { NewOrderButton } from "./screens/Orders.tsx";
 import PlaceOrder from "./screens/order/PlaceOrder.tsx";
 import Receive from "./screens/receive/Receive.tsx";
 import Track from "./screens/Track.tsx";
@@ -100,6 +101,8 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
   const warehouse = useResource((s) => gateway.catalogueStatus(s), "catalogue", 60_000);
   // Today on the business clock, which demo mode can move.
   useClockOffset();
+  // The warehouse's names on every product label (docs/issues/product-names/PLAN.md).
+  useProductNames();
   const today = depotToday();
   const deliveries = useResource(
     outletId ? (s) => gateway.deliveries(outletId, today, s) : null,
@@ -186,6 +189,18 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
       setThread({ threadId: n.subjectId });
       return;
     }
+    // A breakdown, a blocked road, or the driver finding the store closed: the notice says the
+    // dispatcher tells the store in the trip's messages, so that is where its tap goes.
+    const onTrip = (n.subjectType === "vehicle" && n.subjectId) || n.eventType === "delivery.problem_reported"
+      ? (deliveries.data ?? [])
+          .filter((d) => (n.subjectType === "vehicle" ? d.vehicleId === n.subjectId : d.deliveryId === n.subjectId))
+          .sort((a, b) => Number(b.outcome === "PENDING" || b.outcome === "ARRIVED") - Number(a.outcome === "PENDING" || a.outcome === "ARRIVED"))[0]
+      : undefined;
+    if (onTrip) {
+      setInboxOpen(false);
+      setThread({ tripId: onTrip.tripId, vehicleId: onTrip.vehicleId });
+      return;
+    }
     setView({ kind: "tabs" });
     if (n.subjectType === "order" && n.subjectId) {
       setTab("orders");
@@ -238,7 +253,8 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
         amend={view.amend}
         warehouseDown={warehouseDown}
         commands={commands}
-        onDone={() => showTab("orders")}
+        // "Back to home" in the Order sent dialog says where it goes.
+        onDone={() => showTab("home")}
         onEdit={(orderId) => {
           showTab("orders");
           setOpenOrder(orderId);
@@ -322,7 +338,7 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
       />
     );
   } else if (tab === "orders") {
-    body = <Orders orders={all} loading={orders.loading} error={orders.error} onOpen={setOpenOrder} onPlace={place} onRetry={orders.refresh} />;
+    body = <Orders orders={all} loading={orders.loading} error={orders.error} onOpen={setOpenOrder} onPlace={place} onRetry={orders.refresh} clearTopBar={!warehouseDown && !flushError} />;
   } else if (tab === "issues") {
     body = (
       <Issues
@@ -374,6 +390,7 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
         syncing={syncing || orders.loading}
         unread={inbox.unread}
         onNotifications={gateway.sample ? undefined : () => setInboxOpen(true)}
+        action={view.kind === "tabs" && tab === "orders" ? <NewOrderButton onPlace={place} /> : undefined}
       />
       {thread && (
         <TripMessages
@@ -382,10 +399,14 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
           online={online}
           onQueued={queued}
           onClose={() => setThread(null)}
-          delivery={"tripId" in thread ? (deliveries.data ?? []).find((d) => d.tripId === thread.tripId) ?? null : null}
+          deliveries={deliveries.data ?? []}
+          questions={<Decisions decisions={decisions.data ?? []} accountId={userId} sender={decisionSender} online={online} onAnswer={answerDecision} />}
         />
       )}
       {inboxOpen && <NotificationsDrawer inbox={inbox} onSubject={openSubject} onClose={() => setInboxOpen(false)} />}
+      {/* From lg a notice is the first row, so it stops short of the top bar and the page heading below it takes the full width. */}
+      {(warehouseDown || flushError) && (
+        <div className="flex flex-col gap-3 lg:mr-[calc(var(--store-topbar-w,240px)+12px)]">
       {warehouseDown && (
         <Notice tone="warning" live title={t("The warehouse is not answering")}>
           {t("You can still place orders. They are kept as “stock not checked” and confirmed once the warehouse is back, never before.")}
@@ -402,6 +423,8 @@ function StoreScreens({ userId, displayName, scope }: StoreProps): React.JSX.Ele
             </button>
           }
         />
+      )}
+        </div>
       )}
       {body}
       {gateway.sample && view.kind === "tabs" && (

@@ -5,7 +5,7 @@ import { request } from "@shared/api/client";
 import { useResource } from "@shared/api/useResource";
 import type { DecisionView } from "@shared/domain/types";
 import { cx } from "@shared/ui";
-import { clockOn, hhmm, stops } from "@shared/wording";
+import { businessNow, clockOn, hhmm, stops } from "@shared/wording";
 import { lateBy, tripOf, updateText, useOpenTripThread } from "../data/threads.ts";
 import { depotSummaries, etaOf, groupByTrip, NEEDS_SHOWN, progress, routeLabel, summaryText, type NeedCard, type Run } from "../data/liveDesk.ts";
 import { playbookOf, suggestionFor, type Suggestion } from "../data/playbooks.ts";
@@ -64,6 +64,8 @@ export default function LiveNeeds({
   // server once; while it cannot be read, a card offers no steps rather than old ones.
   const playbooks = usePlaybooks();
   const suggest = (card: NeedCard): { suggestion: Suggestion; tripId: string | null; outletId: string | null } | null => {
+    // A message to check has no playbook: checking it is the step.
+    if (card.kind === "check") return null;
     const playbook = playbookOf(playbooks.data, card.kind);
     if (!playbook) return null;
     const run = runs.find((r) => r.day.vehicleId === card.vehicleId);
@@ -121,6 +123,11 @@ export default function LiveNeeds({
             Book make-up
           </Action>
         )}
+        {card.kind === "check" && card.tripId && (
+          <Action primary className="flex-1" onClick={() => void openThread(card.tripId!).then(setNote)}>
+            Check it
+          </Action>
+        )}
         {(card.kind === "failed" || card.kind === "left") && card.vehicleId && (
           <Action primary className="flex-1" onClick={() => onOpenTrip(card.vehicleId!)}>
             Open trip
@@ -134,7 +141,7 @@ export default function LiveNeeds({
           stops={stopOf(card)!.stops}
           decisions={decisions.data ?? []}
           online={online}
-          now={new Date()}
+          now={businessNow()}
           date={date}
           onChanged={decisions.refresh}
         />

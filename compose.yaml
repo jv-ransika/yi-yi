@@ -127,6 +127,9 @@ services:
       # Jev in shadow (roadmap AI-J1): guesses issue types and report situations, nobody sees it. Off unless true.
       JEV_ENABLED: ${JEV_ENABLED:-false}
       JEV_MODEL: ${JEV_MODEL:-typesafe/jev-1.13}
+      # Jev live on the trip's chat (R-ML-35): off until agreed; needs JEV_ENABLED.
+      JEV_LIVE: ${JEV_LIVE:-false}
+      JEV_LIVE_MIN_CONFIDENCE: ${JEV_LIVE_MIN_CONFIDENCE:-0.5}
       # The speech service (R-MSG-10): http://speech:8090 with the "speech" profile; blank turns it off.
       SPEECH_URL: ${SPEECH_URL:-}
       # Roadmap M-01: the object store. OBJECT_STORE=s3 with all four S3 values set puts new proofs there.
@@ -202,6 +205,11 @@ services:
     build:
       context: ./ml-server
     mem_limit: ${ML_MEM:-1536m}
+    environment:
+      # Issue #12: models retraining produced, beside the image's. Read only: only training.run writes it.
+      ML_STORE_DIR: /srv/store
+    volumes:
+      - ${ML_STORE_PATH:-./ml-store}:/srv/store:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]

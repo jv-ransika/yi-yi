@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useProductNames } from "@shared/catalogue/useProductNames";
 import { flushSync } from "react-dom";
 import type { NotificationView } from "@shared/domain/notification";
 import { ago } from "@shared/notifications/inbox";
@@ -16,6 +17,7 @@ import { metres } from "@shared/ui/map/geo";
 import { chime, unlockSoundOnFirstTap } from "./data/chime.ts";
 import { mayChime, OFF, onMotion, openByHand, remindDue, slideOut, type DrivingState } from "./data/drivingMode.ts";
 import HomeNoVehicle from "./screens/HomeNoVehicle.tsx";
+import TripHistory from "./screens/TripHistory.tsx";
 import { unreadMessages } from "./data/messages.ts";
 import { useKeptTripAudio } from "@shared/messaging/audioCache";
 import RefusedUploads from "./screens/RefusedUploads.tsx";
@@ -42,6 +44,8 @@ const ROUTE_CHANGED = new Set(["plan.revised", "delivery.skipped"]);
  * proof, the problem report and the stop detail keep their working forms.
  */
 export default function Driver({ userId, displayName, scope }: { userId: string; displayName: string; scope: string[] }): React.JSX.Element {
+  // The warehouse's names on every product label (docs/issues/product-names/PLAN.md).
+  useProductNames();
   const d = useDriver(userId, scope[0] ?? null);
   const inbox = useInbox(userId);
   const shell = useShell();
@@ -233,6 +237,7 @@ export default function Driver({ userId, displayName, scope }: { userId: string;
                 onToggleLang={setLang}
                 displayName={displayName}
                 onSignOut={d.askSignOut}
+                onHistory={() => d.go({ name: "history" })}
                 onToggleTheme={d.theme}
                 isNight={d.dark}
                 onMessages={openNotifications}
@@ -343,6 +348,11 @@ export default function Driver({ userId, displayName, scope }: { userId: string;
                   />
                 </GoLayer>
               )}
+              {screen === "history" && (
+                <GoLayer dark={d.dark} sync={sync} onBack={() => d.go({ name: "home" })}>
+                  <TripHistory load={d.pastTrips} online={online} />
+                </GoLayer>
+              )}
               {screen === "stop" && detail && (
                 <GoLayer dark={d.dark} sync={sync} onBack={() => d.go({ name: "home" })}>
                   <StopDetail
@@ -414,8 +424,9 @@ export default function Driver({ userId, displayName, scope }: { userId: string;
             </div>
           </div>
           {d.location.simulate && d.nextPoint && screen === "route" && (
-            <div className="absolute inset-x-0 bottom-10 z-40 flex justify-center">
-              <OutlineButton onClick={() => d.nextPoint && d.location.simulate?.(d.nextPoint)}>
+            // Kept inside the screen's gutter at any width, on one line: the driver button is full width and large by default.
+            <div className="absolute inset-x-0 bottom-10 z-40 flex justify-center px-5">
+              <OutlineButton className="max-w-[420px] bg-go-canvas min-h-12! px-3! text-[15px]!" onClick={() => d.nextPoint && d.location.simulate?.(d.nextPoint)}>
                 {tr(d.location.simulating ? "Driving… (demo)" : "Simulate drive to the next stop (demo)")}
               </OutlineButton>
             </div>

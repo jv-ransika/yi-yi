@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-10-22 - fix: a day at risk no longer also says the order is likely to share a trip
+
+`dev` · @jv-ransika
+
+On the store's Place order screen a day at risk showed both "Likely to share a trip" and "your order may move a day", which contradict each other. The share note is left off a day at risk; a busy day still shows it, as it can still share a trip (R-ORD-17).
+Verified: store browser suites `shared-days` (with a new case), `outlook`, `ride-along`; typecheck, build.
+
+## 2026-10-22 - feat: three more demo store managers, for OUT002, OUT003 and OUT008
+
+`dev` · @jv-ransika
+
+Testing several stores on one demo day needed an account per outlet. `scripts/demo-accounts.csv` adds `out002@`, `out003@` and `out008@waypoint.local` (store managers, `SEED_PASSWORD`), and `scripts/seed-demo.sql` gives each its outlet, so every fresh install and demo reset has them. A demo database now makes its accounts with `DEMO_SIGN_IN_PASSWORD` when set (`deploy/vps/demo-reset.sh`), so accounts only the demo has open with the demo password too. The spare demo database is also marked with a fingerprint of the mounted seed files, since a reset just after this change still swapped in a spare built from the old account list.
+Verified: a preview demo reset, each signing in and seeing its outlet.
+
 ## 2026-10-20 - feat: deciding a deferred order shows matching trips and whom to call; times carry their day
 
 `claude/demo-day-plan` · @jv-ransika

@@ -23,7 +23,7 @@ public class JdbcTranscripts {
   /** A note's transcript as a reader sees it. */
   public record Transcript(
       UUID voiceNoteId, String status, Optional<String> text, Optional<String> language, String engine,
-      boolean audioGone) {}
+      boolean audioGone, boolean unclear) {}
 
   /** Queues a note once; applying the event twice queues nothing new. */
   public void queue(UUID voiceNoteId, String engine, Instant now) {
@@ -46,10 +46,15 @@ public class JdbcTranscripts {
   }
 
   public void done(UUID voiceNoteId, String text, Optional<String> language, String engine, Instant now) {
+    done(voiceNoteId, text, language, false, engine, now);
+  }
+
+  /** @param unclear the engine said part of it is uncertain (R-ML-37) */
+  public void done(UUID voiceNoteId, String text, Optional<String> language, boolean unclear, String engine, Instant now) {
     database.update(
-        "UPDATE messaging.voice_transcripts SET status = 'done', transcript = ?, language = ?, engine = ?,"
+        "UPDATE messaging.voice_transcripts SET status = 'done', transcript = ?, language = ?, unclear = ?, engine = ?,"
             + " attempts = attempts + 1, finished_at = ? WHERE voice_note_id = ? AND status = 'pending'",
-        text, language.orElse(null), engine, Timestamp.from(now), voiceNoteId);
+        text, language.orElse(null), unclear, engine, Timestamp.from(now), voiceNoteId);
   }
 
   /** Another try later, or failed for good after the last one. */
@@ -93,7 +98,7 @@ public class JdbcTranscripts {
     Map<UUID, Transcript> out = new HashMap<>();
     if (voiceNoteIds.isEmpty()) return out;
     database.query(
-            "SELECT voice_note_id, status, transcript, language, engine, audio_gone_at FROM messaging.voice_transcripts"
+            "SELECT voice_note_id, status, transcript, language, engine, audio_gone_at, unclear FROM messaging.voice_transcripts"
                 + " WHERE voice_note_id = ANY (?::uuid[])",
             (Object) voiceNoteIds.toArray(UUID[]::new))
         .forEach(r -> out.put(
@@ -101,7 +106,7 @@ public class JdbcTranscripts {
             new Transcript(
                 (UUID) r.get("voice_note_id"), (String) r.get("status"),
                 Optional.ofNullable((String) r.get("transcript")), Optional.ofNullable((String) r.get("language")),
-                (String) r.get("engine"), r.get("audio_gone_at") != null)));
+                (String) r.get("engine"), r.get("audio_gone_at") != null, Boolean.TRUE.equals(r.get("unclear")))));
     return out;
   }
 }

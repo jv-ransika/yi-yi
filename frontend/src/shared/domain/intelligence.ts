@@ -2,7 +2,11 @@ import type { Decimal, IsoDate, IsoInstant, Uuid } from "./common.ts";
 
 // Mirrors com.waypoint.dispatch.intelligence.contract.
 
-export type ModelStatus = "REGISTERED" | "ACTIVE" | "RETIRED";
+/** SHADOW: scored beside the active model of its kind, never answering (issue #12, R-ML-40). */
+export type ModelStatus = "REGISTERED" | "ACTIVE" | "SHADOW" | "RETIRED";
+
+/** CANDIDATE: retraining produced it. REPLACED: a promotion replaced it, kept as the challenger (R-ML-42). */
+export type ShadowRole = "CANDIDATE" | "REPLACED";
 
 /** delivery_risk: service minutes and P(late) per stop. demand_forecast: weekly m3 per depot and brand. */
 export type ModelKind = "delivery_risk" | "demand_forecast";
@@ -20,6 +24,28 @@ export type ModelVersionView = {
   activatedAt: IsoInstant | null;
   retiredReason: string | null;
   rowVersion: number;
+  shadowRole: ShadowRole | null;
+  shadowedAt: IsoInstant | null;
+};
+
+/** One night's comparison of the shadow with the model that answered, on the same labelled stops (R-ML-40). */
+export type ShadowReviewView = {
+  kind: ModelKind;
+  modelLabel: string;
+  shadowRole: ShadowRole;
+  /** The active model's "name@version", or "deterministic". */
+  incumbentLabel: string;
+  reviewedOn: IsoDate;
+  windowFrom: IsoDate;
+  windowTo: IsoDate;
+  stops: number;
+  shadowBrier: Decimal | null;
+  shadowLogLoss: Decimal | null;
+  incumbentBrier: Decimal | null;
+  incumbentLogLoss: Decimal | null;
+  verdict: "BETTER" | "WORSE" | "MIXED" | "NOT_ENOUGH";
+  /** rolled_back: the system put the replaced model back (R-ML-42). */
+  action: "rolled_back" | null;
 };
 
 /** Chilled volume is zero for Style and Tech. degraded: the deterministic forecast answered. */
@@ -378,9 +404,94 @@ export type SuggestionsView = {
   playbook: PlaybookView;
 };
 
+/** One decision's chance, 0 to 1, summing to 1 over the list it is in (R-ML-34). */
+export type ChanceView = { action: string; chance: number; warning: string | null };
+
+/**
+ * GET /api/ml/trip-outlook?tripId=: one trip's decision outlook (decision
+ * suggestions part 2, R-ML-34). The chance of each decision about the trip and
+ * of each outcome for every stop still waiting, from its open reports.
+ */
+export type TripOutlookView = {
+  tripId: string;
+  version: number;
+  /** BREAKDOWN, ROAD_BLOCKED or RUNNING_LATE when one is on the trip. */
+  situation: string | null;
+  /** END_TRIP, WAIT, CARRY_ON, most likely first; empty with no trip situation. */
+  trip: ChanceView[];
+  /** What it was made from; `source` is "report" or "message" (read automatically). */
+  signals: {
+    messageId: string;
+    situation: string;
+    source: "report" | "message";
+    outletId: string | null;
+    /** For a message read automatically (R-ML-35): driver or store_manager. */
+    authorRole: string | null;
+    /** A report that raised an Issue: the room's "Mark handled" resolves both. Absent from older servers. */
+    issueId?: string | null;
+  }[];
+  stops: {
+    deliveryId: string;
+    outletId: string;
+    sequence: number;
+    rowVersion: number;
+    situation: string;
+    /** SKIP_NEXT_DAY, SKIP_CANCEL, ASK_RECEIVE_LATER, DELIVER, most likely first. */
+    chances: ChanceView[];
+    learned: boolean;
+    because: string[];
+  }[];
+  /** Drivers' and stores' own words are read for it (R-ML-35); false, it stands on reports alone. */
+  messagesRead: boolean;
+  /** Words that could not be read: waiting over a minute, or given up on (rule 9). */
+  unreadMessages: number;
+  /** The trip's problem room (R-ML-36): each store's row and the one next step; null with no problem open. */
+  room: RoomView | null;
+  /** R-ML-37: messages read unsure, or from voice notes heard unclearly, for the dispatcher to confirm. */
+  toReview: { messageId: string; guess: string | null; unclear: boolean; source: string; authorRole: string; outletId: string | null }[];
+};
+
+/** GET /api/ml/messages-to-check?depot=&date=: a message waiting for a dispatcher to check, for "Needs you" (R-ML-37). */
+export type MessageCheckView = { tripId: string; message: TripOutlookView["toReview"][number] };
+
+export type RoomState =
+  | "NOT_ASKED" | "MALL_CANNOT_WAIT" | "IN_WINDOW" | "ASKED" | "YES" | "NO" | "NO_ANSWER"
+  | "DOCK_ASKED" | "DOCK_YES" | "DOCK_NO" | "SKIPPED" | "DELIVERED";
+
+export type RoomStepKind = "ASK" | "END_TRIP" | "SKIP" | "CALL" | "ASK_DOCK" | "TELL_DRIVER_DOCK" | "WAIT" | "DONE";
+
+export type RoomTarget = { deliveryId: string; outletId: string; receiveAt: string | null; rowVersion: number };
+
+/** R-ML-36: the problem, each store's row and the one next step, chosen by rules from the stores' answers. */
+export type RoomView = {
+  situation: string;
+  rows: { deliveryId: string; outletId: string; sequence: number; state: RoomState; at: string | null; because: string | null }[];
+  next: {
+    kind: RoomStepKind;
+    stops: RoomTarget[];
+    /** For the dock: the skipped store whose goods are in the way. */
+    about: RoomTarget | null;
+    /** The fact the step follows from, in plain words. */
+    why: string;
+    extraMinutes: number | null;
+    extras: number[];
+    /** A breakdown also offers "the driver can't go on: end trip". */
+    endTripToo: boolean;
+  };
+  /** R-ML-45: what stores wrote in the chat that reads as the answer to their open question. Absent from older servers. */
+  heard?: HeardView[];
+};
+
+/** A store's chat words read as its answer, for the dispatcher to record or wave off. Names and numbers masked. */
+export type HeardView = { requestId: string; outletId: string; messageId: string; words: string; reads: "YES" | "NO" | "LATER"; at: string };
+
 export const SuggestionCommandKind = {
   /** The suggestions shown beside a stop and the one taken, or none. */
   record: "ml:RecordSuggestion",
+  /** A message read automatically taken off the trip's Next step card, with a reason (R-ML-35). */
+  dismissSignal: "ml:DismissSignal",
+  /** What a message read unsure or unclearly reports, confirmed by the dispatcher (R-ML-37). */
+  confirmSignal: "ml:ConfirmSignal",
 } as const;
 
 export type RecordSuggestionPayload = { deliveryId: string; situation: string; shown: DecisionAction[]; chosen?: DecisionAction };
@@ -410,7 +521,8 @@ export type AiFailureView = {
   sentFacts: string;
 };
 
-export type JevVersionView = { promptVersion: string | null; model: string; answered: number; agreed: number };
+/** `source` (R-ML-33): what Jev was asked about; absent from a server older than it. */
+export type JevVersionView = { promptVersion: string | null; model: string; answered: number; agreed: number; source?: "issue" | "report" };
 export type JevHealthView = { pending: number; answered: number; agreed: number; failed: number; byVersion: JevVersionView[] };
 export type SuggestionUseView = { situation: string; decided: number; chosen: number; chosenFirst: number };
 
